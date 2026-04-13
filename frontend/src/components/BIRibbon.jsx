@@ -560,56 +560,6 @@ const BIRibbon = ({ activeTab, setActiveTab, onAction, fileName, activeMeasure, 
 
     const renderModelingToolbar = () => (
         <>
-            {/* ── Relationships ── */}
-            <Group label="Relationships">
-                <RibbonBtn
-                    icon={<Database size={32} />}
-                    label="Manage relationships"
-                    onClick={() => act('manage_relationships')}
-                    tooltip="Create, edit, and delete relationships between tables"
-                />
-            </Group>
-
-            {/* ── Calculations ── */}
-            <Group label="Calculations">
-                <div className="bi-dropdown-wrapper">
-                    <RibbonBtn
-                        icon={<Calculator size={32} />}
-                        label="New visual calculation"
-                        onClick={() => toggleDropdown('new_calc')}
-                        tooltip="Create a visual calculation"
-                    >
-                        <ChevronDown size={11} style={{ marginLeft: 2 }} />
-                    </RibbonBtn>
-                    {openDropdown === 'new_calc' && (
-                        <Dropdown options={newCalcOptions} onClose={closeDropdown} onSelect={act} />
-                    )}
-                </div>
-                <RibbonBtn
-                    icon={<Calculator size={32} />}
-                    label="New measure"
-                    onClick={() => act('new_measure')}
-                    tooltip="Open formula bar to create a dynamic measure"
-                />
-                <RibbonBtn
-                    icon={<Zap size={32} />}
-                    label="Quick measure"
-                    onClick={() => act('quick_measures')}
-                    tooltip="Use guided templates for common calculations"
-                />
-                <RibbonBtn
-                    icon={<Plus size={32} />}
-                    label="New column"
-                    onClick={() => act('new_column')}
-                    tooltip="Create a new column that's calculated for each row"
-                />
-                <RibbonBtn
-                    icon={<Table size={32} />}
-                    label="New table"
-                    onClick={() => act('new_table')}
-                    tooltip="Create a new table based on a DAX expression"
-                />
-            </Group>
 
             {/* ── Calendars ── */}
             <Group label="Calendars">

@@ -37,3 +37,4 @@ snowflake-sqlalchemy
 psycopg2-binary
 playwright
 reportlab
+asyncpg
