@@ -183,6 +183,7 @@ const BIWorkspace = ({
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showPaginatedReportModal, setShowPaginatedReportModal] = useState(false);
+  const [reportElements, setReportElements] = useState([]);
   const [isSqlConnecting, setIsSqlConnecting] = useState(false);
   const [sqlError, setSqlError] = useState('');
   const [sqlSuccess, setSqlSuccess] = useState('');
@@ -234,6 +235,29 @@ const BIWorkspace = ({
       window.fetch = originalFetch;
     };
   }, [simulationData]);
+
+  const handleAddToReport = useCallback((graph) => {
+    if (!graph) return;
+    
+    const element = {
+      id: graph.id,
+      type: graph.graph_type,
+      title: graph.options?.title || graph.graph_type,
+      x_axis: graph.x_axis,
+      y_axis: graph.y_axis,
+      config: graph.options || {},
+      cached_data: graph.cached_data
+    };
+    
+    setReportElements(prev => {
+      if (prev.some(e => e.id === element.id)) {
+        return prev;
+      }
+      return [...prev, element];
+    });
+    
+    alert(`"${element.title}" added to report. Open Insert > Paginated Report to generate PDF.`);
+  }, []);
 
   // Auto-update port based on DB type for SQL Modal
   useEffect(() => {
@@ -3565,6 +3589,7 @@ const BIWorkspace = ({
                         dragOverItemIndex={dragOverItemIndex}
                         onButtonAction={handleButtonAction}
                         onDeselectVisual={() => setActiveVisualId(null)}
+                        onAddToReport={handleAddToReport}
                         showGridlines={showGridlines && !isViewOnly}
                         snapToGrid={snapToGrid}
                         lockObjects={lockObjects || isViewOnly}
@@ -3963,6 +3988,10 @@ const BIWorkspace = ({
         onClose={() => setShowPaginatedReportModal(false)}
         fileId={fileId}
         userId={userId}
+        dataset={dataset}
+        fileName={fileName}
+        reportElements={reportElements}
+        onReportElementsChange={setReportElements}
       />
       <MarkDateTableModal
         isOpen={showMarkDateTableModal}

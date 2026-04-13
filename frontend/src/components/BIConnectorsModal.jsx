@@ -23,7 +23,7 @@ import {
   Users,
   MessageSquare,
   GitBranch,
-  Slack,
+  Hash,
   Zap,
   Mail,
   ChevronLeft,
@@ -99,7 +99,7 @@ const CONNECTORS = [
   { id: 'shopify', engine: 'shopify', label: 'Shopify', short: 'Shopify', cat: 'ecommerce', icon: ShoppingCart, accent: '#95bf47' },
 
   // Collaboration
-  { id: 'slack',    engine: 'slack',    label: 'Slack',    short: 'Slack',   cat: 'collab', icon: Slack,      accent: '#4a154b' },
+  { id: 'slack',    engine: 'slack',    label: 'Slack',    short: 'Slack',   cat: 'collab', icon: Hash,      accent: '#4a154b' },
   { id: 'github',   engine: 'github',   label: 'GitHub',   short: 'GitHub',  cat: 'collab', icon: GitBranch,  accent: '#24292f' },
   { id: 'notion',   engine: 'notion',   label: 'Notion',   short: 'Notion',  cat: 'collab', icon: FileText,   accent: '#000000' },
   { id: 'airtable', engine: 'airtable', label: 'Airtable', short: 'Airtable',cat: 'collab', icon: Layers,     accent: '#ff6d00' },

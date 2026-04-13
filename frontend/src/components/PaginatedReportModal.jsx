@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, FileText, Download, Table, BarChart } from 'lucide-react';
+import { X, FileText, Download, Table, BarChart, Trash2, GripVertical } from 'lucide-react';
 import './PaginatedReportModal.css';
 
 const PaginatedReportModal = ({
@@ -7,11 +7,12 @@ const PaginatedReportModal = ({
   onClose,
   fileId,
   dataset,
-  fileName
+  fileName,
+  reportElements = [],
+  onReportElementsChange
 }) => {
   if (!isOpen) return null;
 
-  // Validate fileId exists
   const validFileId = fileId || (dataset && dataset.metadata && dataset.metadata.fileId);
 
   const [reportName, setReportName] = useState(fileName ? `${fileName} Report` : 'Paginated Report');
@@ -23,6 +24,7 @@ const PaginatedReportModal = ({
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [includeSummary, setIncludeSummary] = useState(true);
+  const [localElements, setLocalElements] = useState(reportElements);
 
   useEffect(() => {
     if (dataset && dataset.columns) {
@@ -30,6 +32,18 @@ const PaginatedReportModal = ({
       setSelectedColumns(cols);
     }
   }, [dataset]);
+
+  useEffect(() => {
+    setLocalElements(reportElements);
+  }, [reportElements]);
+
+  const removeElement = (elementId) => {
+    setLocalElements(prev => prev.filter(e => e.id !== elementId));
+    if (onReportElementsChange) {
+      const updated = localElements.filter(e => e.id !== elementId);
+      onReportElementsChange(updated);
+    }
+  };
 
   const toggleColumn = (colName) => {
     setSelectedColumns(prev => 
@@ -51,57 +65,104 @@ const PaginatedReportModal = ({
 
   const handleGenerate = async () => {
     const activeFileId = validFileId;
-    if (!activeFileId || selectedColumns.length === 0) {
-      alert('Please select at least one column');
-      return;
-    }
-
+    
     setIsGenerating(true);
 
     try {
-      const createResponse = await fetch('/api/reports/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: reportName,
-          page_size: pageSize,
-          orientation: orientation,
-          elements: [
-            {
-              type: 'table',
-              config_json: {
-                data_source_index: 0,
-                columns: selectedColumns.map(col => ({ name: col, header: col })),
-                rows_per_page: rowsPerPage,
-                show_header: showHeader,
-                show_footer: showFooter
-              }
-            }
-          ],
-          data_sources: [
-            {
-              connection_id: activeFileId,
-              query: null
-            }
-          ]
-        })
-      });
-
-      if (!createResponse.ok) {
-        const err = await createResponse.json();
-        throw new Error(err.detail || 'Failed to create report');
+      const elements = [];
+      
+      for (const el of localElements) {
+        let elementData = null;
+        
+        if (el.cached_data) {
+          if (el.cached_data.is_table && el.cached_data.rows) {
+            elementData = el.cached_data.rows;
+          } else if (Array.isArray(el.cached_data.labels)) {
+            elementData = el.cached_data.labels.map((label, idx) => ({
+              name: label,
+              value: el.cached_data.values ? el.cached_data.values[idx] : 0
+            }));
+          }
+        }
+        
+        const elementConfig = {
+          title: el.title,
+          xField: el.x_axis || el.config?.x_axis,
+          yField: el.y_axis || el.config?.y_axis,
+          chartType: el.type
+        };
+        
+        if (el.type === 'table' && el.config?.columns) {
+          elements.push({
+            type: 'table',
+            config: {
+              columns: el.config.columns,
+              rows_per_page: rowsPerPage,
+              show_header: showHeader
+            },
+            data: elementData
+          });
+        } else if (['bar', 'line', 'pie', 'area', 'column'].includes(el.type)) {
+          elements.push({
+            type: 'chart',
+            config: elementConfig,
+            data: elementData
+          });
+        } else if (el.type === 'text') {
+          elements.push({
+            type: 'text',
+            config: {
+              content: el.config?.content || ''
+            },
+            data: null
+          });
+        }
+      }
+      
+      if (selectedColumns.length > 0 && (!elements.length || !localElements.length)) {
+        elements.push({
+          type: 'table',
+          config: {
+            columns: selectedColumns.map(col => ({ name: col, header: col })),
+            rows_per_page: rowsPerPage,
+            show_header: showHeader
+          },
+          data: null
+        });
+      }
+      
+      if (elements.length === 0 && selectedColumns.length === 0) {
+        alert('Please add visualizations to the report or select columns');
+        setIsGenerating(false);
+        return;
+      }
+      
+      const requestBody = {
+        title: reportName,
+        page_size: pageSize,
+        orientation: orientation,
+        elements: elements,
+        file_id: activeFileId
+      };
+      
+      if (activeFileId && elements.length > 0 && elements[0].data === null) {
+        delete elements[0].data;
       }
 
-      const createData = await createResponse.json();
-      const reportId = createData.id;
-
-      const pdfResponse = await fetch(`/api/reports/${reportId}/generate-pdf`, {
+      const pdfResponse = await fetch('/api/reports/generate-pdf-direct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          include_summary: includeSummary
-        })
+        body: JSON.stringify(requestBody)
       });
+
+      console.log('PDF response status:', pdfResponse.status, 'content-type:', pdfResponse.headers.get('content-type'));
+
+      if (pdfResponse.headers.get("content-type") !== "application/pdf") {
+        const error = await pdfResponse.json();
+        alert("PDF generation failed: " + (error.error || error.detail || 'Unknown error'));
+        setIsGenerating(false);
+        return;
+      }
 
       if (!pdfResponse.ok) {
         const err = await pdfResponse.json();
@@ -109,6 +170,12 @@ const PaginatedReportModal = ({
       }
 
       const blob = await pdfResponse.blob();
+      console.log('PDF blob size:', blob.size, 'bytes');
+      
+      if (blob.size < 500) {
+        throw new Error('PDF generated is too small - may be empty or corrupted');
+      }
+      
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -194,6 +261,31 @@ const PaginatedReportModal = ({
             </div>
           </div>
 
+          {localElements.length > 0 && (
+            <div className="paginated-report-section">
+              <h3 className="paginated-report-section-title">Added Visualizations</h3>
+              <div className="paginated-report-elements-list">
+                {localElements.map((el, idx) => (
+                  <div key={el.id} className="paginated-report-element-item">
+                    <GripVertical size={14} style={{ color: '#9ca3af', marginRight: '8px' }} />
+                    <span className="element-type">{el.type}</span>
+                    <span className="element-title">{el.title}</span>
+                    <button 
+                      className="element-remove-btn" 
+                      onClick={() => removeElement(el.id)}
+                      title="Remove from report"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                Added visualizations will be included in the PDF report
+              </p>
+            </div>
+          )}
+
           <div className="paginated-report-section">
             <h3 className="paginated-report-section-title">Options</h3>
             
@@ -272,7 +364,7 @@ const PaginatedReportModal = ({
           <button 
             className="paginated-report-btn paginated-report-btn-generate" 
             onClick={handleGenerate}
-            disabled={isGenerating || selectedColumns.length === 0}
+            disabled={isGenerating || (selectedColumns.length === 0 && localElements.length === 0)}
           >
             {isGenerating ? 'Generating...' : (
               <>

@@ -35,6 +35,7 @@ boto3
 snowflake-connector-python
 snowflake-sqlalchemy
 psycopg2-binary
+asyncpg
 playwright
 reportlab
 asyncpg
