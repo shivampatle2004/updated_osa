@@ -236,11 +236,47 @@ class PaginatedReportEngine:
                 if chart_bytes:
                     img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
                     story.append(img)
-            
+              
             story.append(Spacer(1, 0.3 * inch))
         
-        # ===== 4. TABLE SECTION =====
-        story.append(Paragraph('Detailed Data', styles['SectionHeader']))
+        # First, render all charts
+        has_charts = False
+        for element in elements:
+            el_type = element.get("type")
+            config = element.get("config_json", {})
+            chart_d = config.get("chart_data")
+            print(f"PDF Element: type={el_type}, has_chart_data={chart_d is not None}, keys={list(config.keys())}")
+            if el_type == "chart":
+                has_charts = True
+        
+        print(f"PDF Has charts: {has_charts}, total elements: {len(elements)}")
+        
+        if has_charts:
+            story.append(Paragraph('Visualizations', styles['SectionHeader']))
+            
+            for element in elements:
+                el_type = element.get("type")
+                config = element.get("config_json", {})
+                
+                if el_type == "chart":
+                    chart_data = config.get("chart_data")
+                    chart_type = config.get("chart_type", "bar")
+                    title = config.get("title", "Chart")
+                    
+                    print(f"Rendering chart: {title}, type: {chart_type}, data rows: {len(chart_data) if chart_data else 0}")
+                    
+                    if chart_data and len(chart_data) > 0:
+                        chart_bytes = generate_chart_image(chart_data, chart_type, title)
+                        if chart_bytes:
+                            print(f"Chart image generated: {len(chart_bytes)} bytes")
+                            img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
+                            story.append(img)
+                    
+                    story.append(Spacer(1, 0.2 * inch))
+        
+        # Then, render tables
+        story.append(PageBreak())
+        story.append(Paragraph('Data Tables', styles['SectionHeader']))
         
         for element in elements:
             el_type = element.get("type")
@@ -250,7 +286,7 @@ class PaginatedReportEngine:
                 text = config.get("content", "")
                 story.append(Paragraph(text, styles['Normal']))
                 story.append(Spacer(1, 0.1 * inch))
-                 
+               
             elif el_type == "table":
                 columns = config.get("columns", [])
                 rows_per_page = config.get("rows_per_page", default_rows_per_page)
@@ -343,21 +379,6 @@ class PaginatedReportEngine:
                     # Page break
                     if page_num < total_pages - 1:
                         story.append(PageBreak())
-                
-                story.append(Spacer(1, 0.2 * inch))
-
-            elif el_type == "chart":
-                chart_data = config.get("chart_data")
-                chart_type = config.get("chart_type", "bar")
-                title = config.get("title", "Chart")
-                
-                if chart_data and len(chart_data) > 0:
-                    chart_bytes = generate_chart_image(chart_data, chart_type, title)
-                    if chart_bytes:
-                        img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
-                        story.append(img)
-                else:
-                    story.append(Paragraph("No chart data available.", styles['Normal']))
                 
                 story.append(Spacer(1, 0.2 * inch))
 

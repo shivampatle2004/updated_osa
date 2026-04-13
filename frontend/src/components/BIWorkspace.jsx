@@ -203,19 +203,27 @@ const BIWorkspace = ({
   const handleAddToReport = useCallback((graph) => {
     if (!graph) return;
     
+    const xAxis = graph.x_axis || graph.options?.x_axis || graph.options?.dimensions?.[0];
+    const yAxis = graph.y_axis || graph.options?.y_axis || graph.options?.measures?.[0];
+    
+    console.log('Adding to report:', graph.graph_type, graph.options?.title);
+    console.log('Has cached_data:', !!graph.cached_data);
+    console.log('Graph x_axis:', xAxis, 'y_axis:', yAxis);
+    
     const element = {
       id: graph.id,
       type: graph.graph_type,
       title: graph.options?.title || graph.graph_type,
-      x_axis: graph.x_axis,
-      y_axis: graph.y_axis,
-      config: graph.options || {},
+      x_axis: xAxis,
+      y_axis: yAxis,
+      config: graph.options || graph,
       cached_data: graph.cached_data
     };
     
     setReportElements(prev => {
-      if (prev.some(e => e.id === element.id)) {
-        return prev;
+      const existing = prev.find(e => e.id === element.id);
+      if (existing) {
+        return prev.map(e => e.id === element.id ? element : e);
       }
       return [...prev, element];
     });

@@ -24,7 +24,11 @@ const PaginatedReportModal = ({
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [includeSummary, setIncludeSummary] = useState(true);
-  const [localElements, setLocalElements] = useState(reportElements);
+  const [includeTableData, setIncludeTableData] = useState(true);
+  const [includeCharts, setIncludeCharts] = useState(true);
+  const [localElements, setLocalElements] = useState(() => {
+    return Array.isArray(reportElements) ? reportElements : [];
+  });
 
   useEffect(() => {
     if (dataset && dataset.columns) {
@@ -34,8 +38,18 @@ const PaginatedReportModal = ({
   }, [dataset]);
 
   useEffect(() => {
-    setLocalElements(reportElements);
+    console.log('Report elements updated:', reportElements?.length);
+    if (Array.isArray(reportElements) && reportElements.length > 0) {
+      setLocalElements(reportElements);
+    }
   }, [reportElements]);
+  
+  useEffect(() => {
+    console.log('Modal opened, localElements:', localElements?.length, reportElements?.length);
+    if (Array.isArray(reportElements)) {
+      setLocalElements(reportElements);
+    }
+  }, [isOpen]);
 
   const removeElement = (elementId) => {
     setLocalElements(prev => prev.filter(e => e.id !== elementId));
@@ -65,61 +79,39 @@ const PaginatedReportModal = ({
 
   const handleGenerate = async () => {
     const activeFileId = validFileId;
-    
     setIsGenerating(true);
 
     try {
       const elements = [];
+      const sourceElements = Array.isArray(reportElements) && reportElements.length > 0 ? reportElements : localElements;
       
-      for (const el of localElements) {
-        let elementData = null;
-        
-        if (el.cached_data) {
-          if (el.cached_data.is_table && el.cached_data.rows) {
-            elementData = el.cached_data.rows;
-          } else if (Array.isArray(el.cached_data.labels)) {
-            elementData = el.cached_data.labels.map((label, idx) => ({
-              name: label,
-              value: el.cached_data.values ? el.cached_data.values[idx] : 0
-            }));
-          }
-        }
-        
-        const elementConfig = {
-          title: el.title,
-          xField: el.x_axis || el.config?.x_axis,
-          yField: el.y_axis || el.config?.y_axis,
-          chartType: el.type
-        };
-        
-        if (el.type === 'table' && el.config?.columns) {
-          elements.push({
-            type: 'table',
-            config: {
-              columns: el.config.columns,
-              rows_per_page: rowsPerPage,
-              show_header: showHeader
-            },
-            data: elementData
-          });
-        } else if (['bar', 'line', 'pie', 'area', 'column'].includes(el.type)) {
+      console.log('Elements:', sourceElements?.length, 'includeCharts:', includeCharts);
+      
+      // Add charts
+      for (const el of sourceElements) {
+        if (['bar', 'line', 'pie', 'area', 'column'].includes(el.type)) {
           elements.push({
             type: 'chart',
-            config: elementConfig,
-            data: elementData
+            config: {
+              title: el.title || el.type,
+              xField: el.x_axis,
+              yField: el.y_axis,
+              chartType: el.type,
+              chart_type: el.type
+            },
+            data: null
           });
         } else if (el.type === 'text') {
           elements.push({
             type: 'text',
-            config: {
-              content: el.config?.content || ''
-            },
+            config: { content: el.config?.content || '' },
             data: null
           });
         }
       }
       
-      if (selectedColumns.length > 0 && (!elements.length || !localElements.length)) {
+      // Add table from selected columns
+      if (includeTableData && selectedColumns.length > 0) {
         elements.push({
           type: 'table',
           config: {
@@ -144,10 +136,6 @@ const PaginatedReportModal = ({
         elements: elements,
         file_id: activeFileId
       };
-      
-      if (activeFileId && elements.length > 0 && elements[0].data === null) {
-        delete elements[0].data;
-      }
 
       const pdfResponse = await fetch('/api/reports/generate-pdf-direct', {
         method: 'POST',
@@ -155,7 +143,7 @@ const PaginatedReportModal = ({
         body: JSON.stringify(requestBody)
       });
 
-      console.log('PDF response status:', pdfResponse.status, 'content-type:', pdfResponse.headers.get('content-type'));
+      console.log('PDF response:', pdfResponse.status);
 
       if (pdfResponse.headers.get("content-type") !== "application/pdf") {
         const error = await pdfResponse.json();
@@ -170,10 +158,10 @@ const PaginatedReportModal = ({
       }
 
       const blob = await pdfResponse.blob();
-      console.log('PDF blob size:', blob.size, 'bytes');
+      console.log('PDF size:', blob.size, 'bytes');
       
       if (blob.size < 500) {
-        throw new Error('PDF generated is too small - may be empty or corrupted');
+        throw new Error('PDF too small');
       }
       
       const url = URL.createObjectURL(blob);
@@ -187,8 +175,8 @@ const PaginatedReportModal = ({
 
       onClose();
     } catch (err) {
-      console.error('Error generating report:', err);
-      alert('Error: ' + (err.message || 'Failed to generate report. Please try again.'));
+      console.error('Error:', err);
+      alert('Error: ' + (err.message || 'Failed'));
     } finally {
       setIsGenerating(false);
     }
@@ -250,14 +238,17 @@ const PaginatedReportModal = ({
 
             <div className="paginated-report-field">
               <label className="paginated-report-label">Rows per Page</label>
-              <input
-                type="number"
+              <select
                 value={rowsPerPage}
-                onChange={(e) => setRowsPerPage(parseInt(e.target.value) || 30)}
-                min={10}
-                max={100}
-                className="paginated-report-input"
-              />
+                onChange={(e) => setRowsPerPage(parseInt(e.target.value))}
+                className="paginated-report-select"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={30}>30</option>
+                <option value={40}>40</option>
+                <option value={50}>50</option>
+              </select>
             </div>
           </div>
 
@@ -287,26 +278,51 @@ const PaginatedReportModal = ({
           )}
 
           <div className="paginated-report-section">
-            <h3 className="paginated-report-section-title">Options</h3>
+            <h3 className="paginated-report-section-title">Include in Report</h3>
             
             <div className="paginated-report-checkbox-group">
+              <label className="paginated-report-checkbox">
+                <input
+                  type="checkbox"
+                  checked={includeCharts}
+                  onChange={(e) => setIncludeCharts(e.target.checked)}
+                />
+                <BarChart size={16} />
+                <span>Charts</span>
+              </label>
+
+              <label className="paginated-report-checkbox">
+                <input
+                  type="checkbox"
+                  checked={includeTableData}
+                  onChange={(e) => setIncludeTableData(e.target.checked)}
+                />
+                <Table size={16} />
+                <span>Table Data</span>
+              </label>
+
               <label className="paginated-report-checkbox">
                 <input
                   type="checkbox"
                   checked={includeSummary}
                   onChange={(e) => setIncludeSummary(e.target.checked)}
                 />
-                <Table size={16} />
-                <span>Include Summary (totals, averages)</span>
+                <span>Summary (KPIs)</span>
               </label>
+            </div>
+          </div>
 
+          <div className="paginated-report-section">
+            <h3 className="paginated-report-section-title">Page Settings</h3>
+            
+            <div className="paginated-report-checkbox-group">
               <label className="paginated-report-checkbox">
                 <input
                   type="checkbox"
                   checked={showHeader}
                   onChange={(e) => setShowHeader(e.target.checked)}
                 />
-                <span>Show Header on each page</span>
+                <span>Repeat Header</span>
               </label>
 
               <label className="paginated-report-checkbox">
@@ -315,7 +331,7 @@ const PaginatedReportModal = ({
                   checked={showFooter}
                   onChange={(e) => setShowFooter(e.target.checked)}
                 />
-                <span>Show Footer (Page X of Y)</span>
+                <span>Page Numbers</span>
               </label>
             </div>
           </div>

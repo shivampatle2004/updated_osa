@@ -76,6 +76,8 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
             db.close()
         
         elements = []
+        logger.info(f"===== PDF GENERATION =====")
+        logger.info(f"Request payload: {payload}")
         logger.info(f"Processing {len(elements_data)} elements, data available: {len(all_data) > 0}")
         
         for el in elements_data:
@@ -83,17 +85,25 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
             el_type = el.get("type", "text")
             chart_data = el.get("data")
             
-            logger.info(f"Element type: {el_type}, has data: {chart_data is not None}")
+            logger.info(f"> El: type={el_type}, config_keys={list(config_json.keys())}")
             
-            if not chart_data and all_data:
-                if el_type in ["bar", "line", "pie", "area", "column"]:
-                    x_field = config_json.get("xField") or config_json.get("x_axis")
-                    y_field = config_json.get("yField") or config_json.get("y_field")
+            # FORCE FIX: For ALL charts, ALWAYS add chart_data from all_data
+            if el_type in ["bar", "line", "pie", "area", "column"]:
+                # Always use file data for charts
+                if all_data:
+                    config_json["chart_data"] = all_data[:50]
                     
-                    if x_field or y_field:
-                        chart_data = all_data[:50]
-                        config_json["chart_data"] = chart_data
-                        config_json["chart_type"] = config_json.get("chartType", el_type)
+                    # Set chart type
+                    config_json["chart_type"] = config_json.get("chartType") or config_json.get("chart_type") or el_type
+                    
+                    # Set title and fields
+                    if not config_json.get("title"):
+                        keys = list(all_data[0].keys())
+                        x_field = config_json.get("xField") or (keys[0] if keys else "X")
+                        y_field = config_json.get("yField") or (keys[1] if len(keys) > 1 else "Y")
+                        config_json["title"] = f"{y_field} by {x_field}"
+                    
+                    logger.info(f"FORCE CHART: data={len(config_json.get('chart_data', []))} rows, type={config_json.get('chart_type')}")
             
             if el_type == "table":
                 if not chart_data and all_data:
@@ -103,6 +113,7 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
                 config_json["rows_per_page"] = config_json.get("rows_per_page", 30)
                 if not config_json.get("columns") and all_data:
                     config_json["columns"] = [{"name": c, "header": c} for c in list(all_data[0].keys())[:10]]
+                logger.info(f"Added table with columns: {config_json.get('columns')}")
             
             if el_type == "text":
                 config_json["content"] = config_json.get("content", config_json.get("title", ""))
