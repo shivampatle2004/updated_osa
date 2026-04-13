@@ -473,3 +473,31 @@ class AutomateAction(Base):
 
     workflow = relationship("AutomateWorkflow", back_populates="actions")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODELING LAYER MODELS (Date Table & Change Detection)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DateTable(Base):
+    """Marks a table/dataset as a valid Date Table to enable time intelligence features."""
+    __tablename__ = "date_tables"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    # the ID of the dataset/file or purely a logical name for physical DB tables
+    table_name = Column(String(255), nullable=False)
+    date_column = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChangeDetectionConfig(Base):
+    """Configures periodic background monitoring of specific columns in datasets."""
+    __tablename__ = "change_detection"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    table_name = Column(String(255), nullable=False)
+    column_name = Column(String(255), nullable=False)
+    last_value = Column(String, nullable=True)     # Hash or scalar value
+    last_checked = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), default="Monitoring")  # "Monitoring", "Changed", "Error"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

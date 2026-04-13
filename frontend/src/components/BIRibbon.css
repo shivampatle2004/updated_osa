@@ -504,3 +504,33 @@
     border-color: #0078d4;
     border-width: 2px;
 }
+
+/* Time Slicer Styles */
+.bi-ribbon-select {
+    height: 22px;
+    padding: 0 4px;
+    font-size: 11px;
+    border: 1px solid #d1d5db;
+    border-radius: 2px;
+    background: #fff;
+    color: #111827;
+    width: 120px;
+    outline: none;
+}
+
+.bi-ribbon-select:focus {
+    border-color: #3b82f6;
+}
+
+.osa-ribbon-reset {
+    margin-top: 2px;
+    border: 1px solid #fee2e2 !important;
+}
+
+.osa-ribbon-reset svg {
+    margin-right: 4px;
+}
+
+.osa-ribbon-reset:hover {
+    background-color: #fef2f2 !important;
+}

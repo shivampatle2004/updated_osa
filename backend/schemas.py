@@ -83,6 +83,9 @@ class GraphDataRequest(BaseModel):
     aggregation: Optional[str] = "sum"
     dimension_fields: Optional[List[str]] = None
     measure_fields: Optional[List[Dict[str, str]]] = None
+    year_filter: Optional[int] = None
+    month_filter: Optional[int] = None
+    quarter_filter: Optional[int] = None
 
 class GraphDataResponse(BaseModel):
     labels: List[Any]

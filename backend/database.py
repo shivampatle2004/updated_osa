@@ -83,7 +83,7 @@ def init_db():
                         UserDatabaseConnection, RemoteConnectionProfile, ETLConnection, ETLPipeline, ETLPipelineVersion,
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
-                        PaginatedReport)
+                        PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig)
 
     try:
         Base.metadata.create_all(bind=engine)
@@ -129,3 +129,11 @@ def _ensure_remote_connection_profile_columns():
 
 if __name__ == "__main__":
     init_db()
+
+def get_db():
+    from sqlalchemy.orm import Session
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

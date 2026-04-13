@@ -247,10 +247,14 @@ def get_graph_data(
     db: Session = Depends(get_db)
 ):
     try:
+        # Bypass cache if any date filters are present
+        has_filters = any([request.year_filter, request.month_filter, request.quarter_filter])
+        
         cache_key = _build_graph_cache_key(file_id, request)
-        cached_response = _get_cached_graph_response(cache_key)
-        if cached_response is not None:
-            return cached_response
+        if not has_filters:
+            cached_response = _get_cached_graph_response(cache_key)
+            if cached_response is not None:
+                return cached_response
 
         # 1. Check if the specific graph definition exists and has cached data.
         # Try to find if this matches a recommended graph to use cached data
@@ -293,6 +297,20 @@ def get_graph_data(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error building model: {str(e)}")
 
+        # 3. Apply Time Intelligence filters if requested
+        if has_filters:
+            from models import DateTable
+            date_mapping = db.query(DateTable).filter(DateTable.file_id == file_id).first()
+            if date_mapping:
+                from services.time_intelligence import TimeIntelligence
+                df = TimeIntelligence.apply_date_filters(
+                    df, 
+                    date_mapping.column_name,
+                    year=request.year_filter,
+                    month=request.month_filter,
+                    quarter=request.quarter_filter
+                )
+
         from services.graph_engine import GraphEngine
         result = GraphEngine.get_aggregated_data(
             df, 
@@ -306,7 +324,8 @@ def get_graph_data(
 
         print(f"DEBUG: GraphEngine returned {len(result.get('labels', [])) if isinstance(result, dict) else 'N/A'} items for {request.graph_type}")
         safe_result = _json_safe(result)
-        _set_cached_graph_response(cache_key, safe_result)
+        if not has_filters:
+            _set_cached_graph_response(cache_key, safe_result)
         return safe_result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

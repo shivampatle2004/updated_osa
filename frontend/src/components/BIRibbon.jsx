@@ -9,7 +9,7 @@ import {
     Search, User, Monitor, FilePlus, Layout, MessageSquare, Activity, GitBranch, FileText,
     AppWindow, Image, MousePointer2, TrendingUp, Square, Circle, Minus, Triangle, ArrowRight,
     Users, Eye, Lock, Globe, Settings, Play, BookOpen, ExternalLink, Terminal, Cpu, Info, Palette,
-    Calendar, RefreshCw, UserCheck, Languages, Binary, FileJson, Smartphone, Layers, Timer, Filter, Bookmark, Link2, Tag,
+    Calendar, RefreshCw, UserCheck, Languages, Binary, FileJson, Smartphone, Layers, Timer, Filter, Bookmark, Link2, Tag, X,
     Archive, FileText as FileTextIcon
 } from 'lucide-react';
 import InstallVisualModal from './InstallVisualModal';
@@ -86,7 +86,12 @@ const Group = ({ label, children }) => (
 
 // ── Main Ribbon ──────────────────────────────────────────────────────────────
 
-const BIRibbon = ({ activeTab, setActiveTab, onAction, fileName, activeMeasure, setActiveMeasure, activeColumn, setActiveColumn, onUpdateColumn, fileId, dataset }) => {
+const BIRibbon = ({ 
+    activeTab, setActiveTab, onAction, fileName, 
+    activeMeasure, setActiveMeasure, activeColumn, setActiveColumn, 
+    onUpdateColumn, fileId, dataset,
+    dateHierarchy, dateFilter, setDateFilter
+}) => {
     let tabs = [
         'File', 'Home', 'Insert', 'Modeling', 'View',
         // 'Help', 'Table tools', 'External Tools',
@@ -581,23 +586,6 @@ const BIRibbon = ({ activeTab, setActiveTab, onAction, fileName, activeMeasure, 
                 />
             </Group>
 
-            {/* ── Parameters ── */}
-            <Group label="Parameters">
-                <div className="bi-dropdown-wrapper">
-                    <RibbonBtn
-                        icon={<Settings size={32} />}
-                        label="New parameter"
-                        onClick={() => toggleDropdown('parameters')}
-                        tooltip="Create what-if parameters for users to adjust"
-                    >
-                        <ChevronDown size={11} style={{ marginLeft: 2 }} />
-                    </RibbonBtn>
-                    {openDropdown === 'parameters' && (
-                        <Dropdown options={parameterOptions} onClose={closeDropdown} onSelect={act} />
-                    )}
-                </div>
-            </Group>
-
             {/* ── Security ── */}
             <Group label="Security">
                 <RibbonBtn
@@ -614,22 +602,46 @@ const BIRibbon = ({ activeTab, setActiveTab, onAction, fileName, activeMeasure, 
                 />
             </Group>
 
-            {/* ── Q&A ── */}
-            <Group label="Q&A">
-                <div className="bi-dropdown-wrapper">
-                    <RibbonBtn
-                        icon={<MessageSquare size={32} />}
-                        label="Q&A Setup"
-                        onClick={() => toggleDropdown('qna')}
-                        tooltip="Configure synonyms and question behavior for Q&A"
-                    >
-                        <ChevronDown size={11} style={{ marginLeft: 2 }} />
-                    </RibbonBtn>
-                    {openDropdown === 'qna' && (
-                        <Dropdown options={qnaOptions} onClose={closeDropdown} onSelect={act} />
-                    )}
-                </div>
-            </Group>
+            {/* ── Time Slicer (Added) ── */}
+            {dateHierarchy && (
+                <Group label="Time Slicer">
+                    <div className="bi-tool-column">
+                        <select 
+                            className="bi-ribbon-select"
+                            value={dateFilter.year || ""} 
+                            onChange={(e) => setDateFilter(prev => ({ ...prev, year: e.target.value ? parseInt(e.target.value) : null }))}
+                        >
+                            <option value="">All Years</option>
+                            {dateHierarchy.years.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                        <select 
+                            className="bi-ribbon-select"
+                            value={dateFilter.quarter || ""} 
+                            onChange={(e) => setDateFilter(prev => ({ ...prev, quarter: e.target.value ? parseInt(e.target.value) : null }))}
+                        >
+                            <option value="">All Quarters</option>
+                            {dateHierarchy.quarters.map(q => <option key={q} value={q}>Q{q}</option>)}
+                        </select>
+                    </div>
+                    <div className="bi-tool-column">
+                        <select 
+                            className="bi-ribbon-select"
+                            value={dateFilter.month || ""} 
+                            onChange={(e) => setDateFilter(prev => ({ ...prev, month: e.target.value ? parseInt(e.target.value) : null }))}
+                        >
+                            <option value="">All Months</option>
+                            {dateHierarchy.months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                        <button 
+                            className="bi-ribbon-tool-small osa-ribbon-reset"
+                            onClick={() => setDateFilter({ year: null, month: null, quarter: null })}
+                        >
+                            <X size={12} color="#ef4444" />
+                            <span style={{ color: '#ef4444' }}>Reset Filters</span>
+                        </button>
+                    </div>
+                </Group>
+            )}
         </>
     );
 
