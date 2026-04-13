@@ -79,7 +79,7 @@ const getThemeColor = (id, palette = VIBRANT_PALETTE) => {
     return palette[Math.abs(hash) % palette.length];
 };
 
-const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUpdate, isExporting = false, hideInternalStats = false, isDragging = false, showZoomControls = false, reportTheme = 'theme_default' }) => {
+const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUpdate, isExporting = false, hideInternalStats = false, isDragging = false, showZoomControls = false, reportTheme = 'theme_default', isViewOnly = false }) => {
     const { installedVisuals } = useVisualRegistryStore();
     const MAX_ZOOM = 10;
     const [data, setData] = useState(null);
@@ -774,7 +774,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                             onChange={(e) => setTextContent(e.target.value)}
                             onBlur={() => {
                                 setIsEditing(false);
-                                if (onUpdate) onUpdate({ options: { ...(opts || {}), label: textContent || 'Button' } });
+                                if (onUpdate && !isViewOnly) onUpdate({ options: { ...(opts || {}), label: textContent || 'Button' } });
                             }}
                             style={{
                                 width: '100%',
@@ -2064,7 +2064,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                             onChange={(e) => setTextContent(e.target.value)}
                             onBlur={() => {
                                 setIsEditing(false);
-                                if (onUpdate) onUpdate({ content: textContent });
+                                if (onUpdate && !isViewOnly) onUpdate({ content: textContent });
                             }}
                         />
                     );
@@ -2085,10 +2085,10 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                             cursor: 'text',
                             userSelect: 'none'
                         }}
-                        onDoubleClick={() => setIsEditing(true)}
-                        title="Double-click to edit"
+                        onDoubleClick={() => !isViewOnly && setIsEditing(true)}
+                        title={isViewOnly ? textContent : "Double-click to edit"}
                     >
-                        {textContent || 'Double-click to edit text box'}
+                        {textContent || (isViewOnly ? '' : 'Double-click to edit text box')}
                     </div>
                 );
             case 'paginated_report':
