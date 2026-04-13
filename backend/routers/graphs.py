@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
+from typing import Optional
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import UploadedFile, GraphDefinition, FileColumn
@@ -25,6 +26,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+from .files import verify_write_permission
 
 
 def _nlq_coerce_column_type(raw: str) -> str:
@@ -443,7 +446,8 @@ def compute_key_influencers(
 def save_custom_graph(
     file_id: str,
     request: schemas.GraphDefinitionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
 ):
     # Ensure the file exists
     file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
@@ -489,7 +493,8 @@ def save_custom_graph(
 @top_router.delete("/{graph_id}")
 def delete_graph(
     graph_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
 ):
     # Find the graph
     graph = db.query(GraphDefinition).filter(

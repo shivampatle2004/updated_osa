@@ -10,7 +10,7 @@ from pathlib import Path
 from database import SessionLocal, init_db
 import models, schemas
 from auth_utils import get_password_hash, verify_password
-from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports
+from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, rls
 
 app = FastAPI(title="OneStopAnalytics API")
 
@@ -57,6 +57,7 @@ app.include_router(automate.router)
 app.include_router(modular_connectors.router)
 app.include_router(data_vault.router)
 app.include_router(reports.router)
+app.include_router(rls.router)
 
 # Initialize DB on startup
 @app.on_event("startup")

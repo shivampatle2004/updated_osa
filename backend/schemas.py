@@ -144,3 +144,66 @@ class WorkflowResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROW-LEVEL SECURITY (RLS) SCHEMAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RLSRuleCreate(BaseModel):
+    """Single filter condition to attach to a role."""
+    table_name: str
+    column_name: str
+    operator: str = "="          # =, !=, >, <, >=, <=, IN, NOT IN, CONTAINS, STARTS_WITH, ENDS_WITH
+    value: str                   # comma-separated for IN / NOT IN
+    logic_group: int = 0         # rules in the same group are joined by group_operator
+    group_operator: str = "AND"  # AND | OR — connects this rule to others in its group
+    display_order: int = 0
+
+
+class RLSRuleResponse(RLSRuleCreate):
+    """Rule as returned by the API."""
+    id: str
+    role_id: str
+
+    class Config:
+        from_attributes = True
+
+
+class RLSRoleCreate(BaseModel):
+    """Payload to create a new role."""
+    name: str
+    file_id: Optional[str] = None
+    description: Optional[str] = None
+    permission: str = "view"
+
+
+class RLSRoleUpdate(BaseModel):
+    """Payload to rename / re-describe a role / change permission (rules updated separately)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    permission: Optional[str] = None
+
+
+class RLSRoleResponse(BaseModel):
+    """Full role including nested rules list."""
+    id: str
+    file_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    permission: str
+    rules: List[RLSRuleResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ApplyRLSRequest(BaseModel):
+    """
+    Request body for the filter engine endpoint.
+    Pass one or more role IDs; their rules are unioned (OR between roles, AND within a role).
+    """
+    file_id: str
+    role_ids: List[str]
+    # Optional: limit preview rows returned (default 1000)
+    preview_limit: int = 1000

@@ -22,6 +22,7 @@ const BIDashboardCanvas = ({
     reportTheme = 'theme_default',
     reportHeaderText = '',
     onUpdateReportHeader,
+    isViewOnly = false,
 }) => {
     const [focusedGraphId, setFocusedGraphId] = React.useState(null);
     const [isDraggingOverCanvas, setIsDraggingOverCanvas] = React.useState(false);
@@ -372,7 +373,7 @@ const BIDashboardCanvas = ({
             }}
         >
             {showGridlines && <div className="bi-canvas-grid-lines" />}
-            {isDraggingOverCanvas && (
+            {isDraggingOverCanvas && !isViewOnly && (
                 <div className="bi-drag-hint"><div className="bi-drag-hint-box"><div className="bi-drag-hint-icon">➕</div><p>Drop to add visualization</p></div></div>
             )}
             <div className="bi-report-header-banner" title={reportHeaderText || 'Enter the report name'}>
@@ -398,17 +399,17 @@ const BIDashboardCanvas = ({
                     />
                 ) : (
                     <h1
-                        className={`bi-report-header-title ${String(reportHeaderText || '').trim().toLowerCase() === 'enter the report name' ? 'is-placeholder' : ''}`}
-                        onClick={() => setIsEditingReportHeader(true)}
+                        className={`bi-report-header-title ${String(reportHeaderText || '').trim().toLowerCase() === 'enter the report name' ? 'is-placeholder' : ''} ${isViewOnly ? 'view-only' : ''}`}
+                        onClick={() => !isViewOnly && setIsEditingReportHeader(true)}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
+                            if (!isViewOnly && (e.key === 'Enter' || e.key === ' ')) {
                                 e.preventDefault();
                                 setIsEditingReportHeader(true);
                             }
                         }}
-                        title="Click to edit report name"
+                        title={isViewOnly ? reportHeaderText : "Click to edit report name"}
                     >
                         {reportHeaderText || 'Enter the report name'}
                     </h1>
@@ -436,7 +437,7 @@ const BIDashboardCanvas = ({
                             </div>
                         </div>
                         <div className="bi-focus-body">
-                            <DynamicChart fileId={fileId} graphDefinition={focusedGraph} isExporting={isExporting} hideInternalStats={true} showZoomControls={true} reportTheme={reportTheme} onUpdate={(u) => handleUpdate(focusedGraph.id, u)} />
+                            <DynamicChart fileId={fileId} graphDefinition={focusedGraph} isExporting={isExporting} hideInternalStats={true} showZoomControls={true} reportTheme={reportTheme} isViewOnly={isViewOnly} onUpdate={(u) => handleUpdate(focusedGraph.id, u)} />
                         </div>
                     </div>
                 </div>
@@ -481,7 +482,7 @@ const BIDashboardCanvas = ({
                             data-visual-id={graph.id}
                             role="article"
                             aria-label={ariaLabel}
-                            className={`bi-card bi-visual-card ${activeVisualId === graph.id ? 'selected' : ''} ${resizingGraphId === graph.id ? 'resizing' : ''} ${graph.graph_type === 'text' ? 'bi-is-text' : ''}`}
+                            className={`bi-card bi-visual-card ${activeVisualId === graph.id && !isViewOnly ? 'selected' : ''} ${resizingGraphId === graph.id ? 'resizing' : ''} ${graph.graph_type === 'text' ? 'bi-is-text' : ''} ${isViewOnly ? 'view-only' : ''}`}
                             onMouseDownCapture={(e) => {
                                 if (e.button !== 0) return;
                                 if (onSelectVisual) onSelectVisual(graph.id);
@@ -497,17 +498,19 @@ const BIDashboardCanvas = ({
                             {(!graph.options?.noHeader || activeVisualId === graph.id) && (
                                 <div className="bi-visual-header">
                                     <div className="bi-header-left">
-                                        <div
-                                            className="bi-drag-handle"
-                                            onMouseDown={(e) => startCardDrag(e, graph)}
-                                            title="Drag visualization"
-                                        >
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="9" cy="19" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="15" cy="19" r="2"/></svg>
-                                        </div>
+                                        {!isViewOnly && (
+                                            <div
+                                                className="bi-drag-handle"
+                                                onMouseDown={(e) => startCardDrag(e, graph)}
+                                                title="Drag visualization"
+                                            >
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="9" cy="19" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="15" cy="19" r="2"/></svg>
+                                            </div>
+                                        )}
                                         <span className="bi-visual-title">{graph.options?.title || (graph.graph_type === 'text' ? '' : `${graph.graph_type.toUpperCase()}: ${graph.x_axis}`)}</span>
                                     </div>
                                     <div className="bi-header-actions">
-                                        {hasCustomColors(graph) && (
+                                        {hasCustomColors(graph) && !isViewOnly && (
                                             <button
                                                 className="bi-reset-chart-colors-btn"
                                                 onMouseDown={(e)=>{e.stopPropagation();e.preventDefault();}}
@@ -517,9 +520,11 @@ const BIDashboardCanvas = ({
                                                 ↺
                                             </button>
                                         )}
-                                        <button className="bi-delete-btn" onMouseDown={(e)=>{e.stopPropagation();e.preventDefault();}} onClick={(e)=>{e.stopPropagation();if(window.confirm("Delete this visualization?"))onDeleteVisual(graph.id);}} title="Delete Visualization">
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                                        </button>
+                                        {!isViewOnly && (
+                                            <button className="bi-delete-btn" onMouseDown={(e)=>{e.stopPropagation();e.preventDefault();}} onClick={(e)=>{e.stopPropagation();if(window.confirm("Delete this visualization?"))onDeleteVisual(graph.id);}} title="Delete Visualization">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                                            </button>
+                                        )}
                                         <button className="bi-expand-btn" onMouseDown={(e)=>{e.stopPropagation();e.preventDefault();}} onClick={(e)=>{e.stopPropagation();handleChartClick(graph);}} title="Expand">
                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                                         </button>
@@ -537,6 +542,7 @@ const BIDashboardCanvas = ({
                                     showZoomControls={false}
                                     reportTheme={reportTheme}
                                     isDragging={dragging || resizingGraphId === graph.id}
+                                    isViewOnly={isViewOnly}
                                     onUpdate={(u) => handleUpdate(graph.id, u)}
                                     onClick={(payload) => {
                                         if (graph.graph_type === 'button') {

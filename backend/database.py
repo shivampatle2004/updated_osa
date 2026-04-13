@@ -78,12 +78,11 @@ def init_db():
     if _HAS_PSYCOPG2:
         create_database_if_not_exists()
     
-    # Import models here to ensure they are registered with Base
     from models import (User, UploadedFile, FileColumn, ColumnStatistic, GraphDefinition,
                         UserDatabaseConnection, RemoteConnectionProfile, ETLConnection, ETLPipeline, ETLPipelineVersion,
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
-                        PaginatedReport)
+                        PaginatedReport, RLSRole, RLSRule)
 
     try:
         Base.metadata.create_all(bind=engine)
