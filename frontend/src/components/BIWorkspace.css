@@ -798,6 +798,114 @@
 .theme_storm .bi-center-column { background: #eef6ff; }
 .theme_bloom .bi-center-column { background: #f0fdf9; }
 .theme_sunset .bi-center-column { background: #fff7ed; }
+
+/* Date Filter Bar */
+.osa-date-filter-bar {
+  display: flex;
+  align-items: center;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 16px;
+  gap: 20px;
+  z-index: 55;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
+.osa-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.osa-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.osa-filter-group select {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #1e293b;
+  background-color: #f8fafc;
+  outline: none;
+  min-width: 110px;
+}
+
+.osa-filter-group select:focus {
+  border-color: #3b82f6;
+}
+
+.osa-filter-reset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #ef4444;
+  background: none;
+  border: 1px solid #fee2e2;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.osa-filter-reset:hover {
+  background-color: #fef2f2;
+}
+
+/* Refresh Toast */
+.osa-refresh-toast {
+  position: fixed;
+  top: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #1e293b;
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+  z-index: 15000;
+  animation: osaToastEnter 0.3s ease-out;
+}
+
+@keyframes osaToastEnter {
+  from { transform: translate(-50%, -20px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.spin {
+  animation: osa-spin 1s linear infinite;
+}
+
+@keyframes osa-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Dark Theme overrides for filter bar */
+.dark-theme .osa-date-filter-bar {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+.dark-theme .osa-filter-group select {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
 .theme_forest .bi-center-column { background: #f0fdf4; }
 .theme_monochrome .bi-center-column { background: #f8fafc; }
 /* Financial: light canvas so chart cards stay readable; colors come from chart palette */

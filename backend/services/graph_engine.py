@@ -45,6 +45,9 @@ class GraphEngine:
         normalized = str(agg or "sum").strip().lower()
         if normalized == "avg":
             return "mean"
+        if normalized in ["ytd", "mtd", "runningsum"]:
+            # ytd, mtd compute a sum base, then apply cumsum
+            return "sum"
         return normalized
 
     @staticmethod
@@ -123,16 +126,25 @@ class GraphEngine:
             }
 
         supported_aggs = {"sum", "mean", "min", "max", "count"}
+        time_intel_aggs = {"ytd", "mtd", "runningsum"}
         named_aggs = {}
         measure_expressions = []
         normalized_measures = []
         work_df = df.copy()
 
+        has_time_intel = False
+        time_intel_cols = []
+
         for m in measures:
             column = m.get("column")
-            raw_agg = m.get("aggregation", "sum")
-            agg_engine = GraphEngine._normalize_agg_to_engine(raw_agg)
-            agg_ui = GraphEngine._normalize_agg_to_ui(raw_agg)
+            raw_agg = str(m.get("aggregation", "sum")).strip().lower()
+            if raw_agg in time_intel_aggs:
+                agg_engine = "sum"
+                agg_ui = raw_agg.upper()
+                has_time_intel = True
+            else:
+                agg_engine = GraphEngine._normalize_agg_to_engine(raw_agg)
+                agg_ui = GraphEngine._normalize_agg_to_ui(raw_agg)
 
             if column not in df.columns:
                 return {"labels": [], "values": []}
@@ -166,6 +178,43 @@ class GraphEngine:
             .agg(**named_aggs)
             .reset_index()
         )
+
+        if has_time_intel and len(dimensions) > 0:
+            # For YTD/MTD/RunningSum, sort chronologically by the first dimension and cumsum
+            try:
+                # Convert first dimension to datetime if possible for sorting
+                grouped['_sort_date'] = pd.to_datetime(grouped[dimensions[0]], errors='coerce')
+                # If conversion entirely fails, just sort lexicographically
+                if grouped['_sort_date'].isna().all():
+                    grouped['_sort_date'] = grouped[dimensions[0]]
+                
+                grouped = grouped.sort_values('_sort_date')
+                
+                for alias, (col, method) in named_aggs.items():
+                    # Find which formula this alias belongs to
+                    m_config = next((x for x in measures if f"{GraphEngine._normalize_agg_to_ui(x.get('aggregation', 'sum'))}_{x.get('column')}" == alias), None)
+                    if not m_config: continue
+                    
+                    formula = str(m_config.get("aggregation", "")).lower()
+                    
+                    if formula == "ytd":
+                        # Group by year and cumsum
+                        years = grouped['_sort_date'].dt.year
+                        grouped[alias] = grouped.groupby(years)[alias].cumsum()
+                    elif formula == "mtd":
+                        # Group by month (year+month) and cumsum
+                        months = grouped['_sort_date'].dt.to_period('M')
+                        grouped[alias] = grouped.groupby(months)[alias].cumsum()
+                    elif formula == "runningsum":
+                        # Global cumsum
+                        grouped[alias] = grouped[alias].cumsum()
+                
+                grouped = grouped.drop(columns=['_sort_date'])
+            except Exception as e:
+                print(f"DEBUG: Time intel calculation failed: {str(e)}")
+                pass
+
+
 
         first_measure_alias = list(named_aggs.keys())[0]
         first_measure_agg = normalized_measures[0]["aggregation"]

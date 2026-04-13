@@ -38,3 +38,4 @@ psycopg2-binary
 asyncpg
 playwright
 reportlab
+asyncpg
