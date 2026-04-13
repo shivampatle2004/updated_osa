@@ -1,0 +1,152 @@
+# Full BI Workspace Implementation Plan
+
+## Background
+
+The user wants to implement a full **Power BI Desktop-level** workspace from [powerbi.txt](file:///c:/Users/Lenovo/Downloads/25_osa/powerbi.txt). This covers 11 major feature areas. The existing codebase already has partial implementations of some features.
+
+## What Already Exists (Do Not Rebuild)
+
+| Area | Existing Component | Status |
+|---|---|---|
+| Ribbon Navigation | [BIRibbon.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIRibbon.jsx) | ✅ Tabs + toolbar exist |
+| Dashboard Canvas | [BIDashboardCanvas.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIDashboardCanvas.jsx) | ✅ Grid + KPIs + Focus Mode |
+| Insights Panel | [BIInsightsPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIInsightsPanel.jsx) | ✅ Key Influencers/Segments |
+| Visualizations + Fields | [BIVisualizationsFieldsPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIVisualizationsFieldsPanel.jsx) | ⚠️ Partial – needs drag/drop |
+| Chart Rendering | [DynamicChart.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/DynamicChart.jsx) | ⚠️ Partial – many types |
+| Transformation Editor | [DataTransformationPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/DataTransformationPanel.jsx) | ⚠️ Partial – needs step history |
+| Data Preview | [DataPreviewPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/DataPreviewPanel.jsx) | ✅ Table view with paginate |
+
+---
+
+## Phase 1 — Workspace Architecture & Layout (Foundation)
+
+### Goal: Three-column layout with 3 view modes (Report, Data, Model)
+
+> [!IMPORTANT]
+> This phase is the structural foundation. Everything else builds on top of it.
+
+#### [MODIFY] [LandingPage.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/pages/LandingPage.jsx)
+- Add a **left-side view switcher** with 3 icons: Report View, Data View, Model View
+- Switch the main canvas area based on the `activeView` state
+- In **Report View**: show current [BIDashboardCanvas](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIDashboardCanvas.jsx#5-105)
+- In **Data View**: show `DataPreviewPanel` (already exists)
+- In **Model View**: show new `BIModelView` component (relationship diagram)
+
+#### [NEW] `BIModelView.jsx` + `BIModelView.css`
+- Render a visual ERD-style diagram of dataset tables
+- Show column names and types for each table
+- Allow drag between columns to "create relationships" (visual only, stored as state)
+- Display cardinality labels (1:1, 1:M, M:M)
+
+#### [MODIFY] [BIVisualizationsFieldsPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIVisualizationsFieldsPanel.jsx)
+- Split into three sub-panels: **Visualizations**, **Fields**, **Filters**
+- Add tab switching between them on the right panel
+
+---
+
+## Phase 2 — Ribbon Completeness (Home, Insert, Modeling, View, External Tools)
+
+### Goal: All ribbon tabs must render meaningful toolbars
+
+#### [MODIFY] [BIRibbon.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIRibbon.jsx)
+- **Home Tab** — Already mostly done. Add: Format Painter, Manage Parameters, Data Source Settings, Recent Sources
+- **Insert Tab** — Add toolbar: all visual types, Button types (Back, Drill-through, Navigation), Bookmark Navigator, Shapes, Images, AI Visuals
+- **Modeling Tab** — Add toolbar: New Measure, New Calculated Column, New Table, Quick Measures, Manage Relationships, Cardinality, RLS Settings
+- **View Tab** — Add toolbar: Theme switcher, Page View (Fit/Actual), Gridlines toggle, Snap to grid, Selection pane toggle, Bookmarks pane, Performance analyzer, Sync slicers
+- **External Tools Tab** — Add toolbar: DAX Analyzer (link/launch modal), Model Editor, Performance tools
+
+---
+
+## Phase 3 — Report View Enhancements (Canvas Interactions)
+
+### Goal: Full drag-and-drop, multi-page, formatting, interactions
+
+#### [MODIFY] [BIDashboardCanvas.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIDashboardCanvas.jsx)
+- Add **multi-page support**: tab bar at the bottom (Page 1, Page 2 ... + button to add page)
+- Allow **resize of visual cards** using resize handles
+- Add **drag to reposition** visuals on canvas
+- Layer controls: Bring Forward / Send Backward (z-index management)
+- Align & Distribute tools (triggered from View ribbon)
+- Visual selection: click to select a visual, show selection border + format panel
+
+#### [NEW] `BIFormatPane.jsx` + `BIFormatPane.css`
+- Right panel (replaces Fields pane when a visual is selected)
+- Visual formatting options: title, background, border, font, legend, data labels, axis formatting, color
+
+#### [NEW] `BIFiltersPane.jsx` + `BIFiltersPane.css`
+- Right panel showing 3 filter levels: Visual-level, Page-level, Report-level
+- Drag field to add filter, set filter conditions (is, is not, is blank, top N, etc.)
+
+#### [MODIFY] [BIVisualizationsFieldsPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/BIVisualizationsFieldsPanel.jsx)
+- Complete visual type grid: all chart types shown as icons matching Power BI
+- Drag field from Fields pane onto a visual → auto-bind the field as X/Y/Value
+- Values/Legend/Axis/Tooltip drop zones shown when a visual is selected
+
+---
+
+## Phase 4 — Visualization Library & Calculation Engine
+
+### Goal: Full chart library + DAX-like formula editor
+
+#### [MODIFY] [DynamicChart.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/DynamicChart.jsx)
+- Ensure all types work with real data: Bar, Column, Line, Area, Combo, Pie, Donut, Treemap, Waterfall, Funnel, Scatter
+- Add: **Card**, **Multi-row Card**, **KPI**, **Gauge**, **Table**, **Matrix** renderers
+- Map visuals support: placeholder map with region highlighting
+- AI Visuals section: Key Influencers (already exists), Decomposition tree (tree-view component), Q&A (text input → chart output), Smart Narrative (text summary from stats)
+- Each visual must support aggregation: Sum, Avg, Count, Distinct Count, Min, Max (pass via graphDefinition)
+
+#### [NEW] `BICalculationEditor.jsx` + `BICalculationEditor.css`
+- Modal/panel opened from Modeling tab
+- DAX-like formula bar: `SUMX = SUM([SalesAmount])`, `YTD = TOTALYTD([Sales], [Date])`
+- Functions: SUM, AVERAGE, COUNT, DISTINCTCOUNT, MAX, MIN, CALCULATE, FILTER, ALL, RELATED
+- Time intelligence: TOTALYTD, TOTALMTD, SAMEPERIODLASTYEAR
+- Formula validation with error highlighting
+- Create Measure / Calculated Column / Calculated Table
+
+---
+
+## Phase 5 — Filtering, Security, Performance & Publishing
+
+### Goal: Production-ready features
+
+#### [MODIFY] [DataTransformationPanel.jsx](file:///c:/Users/Lenovo/Downloads/25_osa/one-stop-analytics-saa-s-frontend/frontend/src/components/DataTransformationPanel.jsx)
+- Add **Applied Steps** sidebar showing step history (Remove Columns, Rename, etc.)
+- Each step: show step name, allow delete/reorder
+- Transformations: Remove columns, Rename, Type Change, Split, Group By, Pivot, Unpivot, Replace, Conditional Column, Index, Custom Column
+- Data profiling: column quality %, distribution bars, unique/null counts
+
+#### [NEW] `BISlicer.jsx` + `BISlicer.css`
+- Visual type: Slicer (dropdown, checklist, date range, search)
+- Syncs across pages via shared state in LandingPage
+
+#### [NEW] `BIRowLevelSecurity.jsx` + `BIRowLevelSecurity.css`
+- Modal opened from Modeling tab > RLS Settings
+- Create roles, assign filter expressions (e.g. `[Region] = "East"`)
+- Test mode: preview data as a specific role
+
+#### [NEW] `BIPerformanceAnalyzer.jsx` + `BIPerformanceAnalyzer.css`
+- Panel showing query execution times for each visual on the page
+- Toggle from View tab
+
+#### [MODIFY] Backend (export endpoints)
+- Ensure `/api/files/{file_id}/export-pdf` and `/api/files/{file_id}/export-excel` endpoints work correctly
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- Ensure `npm run dev` builds without errors after each phase
+
+### Manual Verification (per phase)
+1. **Phase 1**: Left switcher switches cleanly between Report, Data, Model views
+2. **Phase 2**: Each ribbon tab shows correct toolbar groups
+3. **Phase 3**: Can resize/drag/reposition visuals; multi-page tabs work
+4. **Phase 4**: Clicking a visual type adds it; formula editor opens and validates
+5. **Phase 5**: Adding a slicer filters all visuals; PDF export works
+
+### Implementation Order
+1. Phase 1 first (it's the container for everything)
+2. Phase 2 in parallel with Phase 3
+3. Phase 4 after Phase 2 and 3 are stable
+4. Phase 5 last, builds on all previous phases

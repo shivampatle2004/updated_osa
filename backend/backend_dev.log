@@ -1,0 +1,13 @@
+INFO:     Will watch for changes in these directories: ['/Users/tanmayrathi/Downloads/one-stop-analytics-saa-s-frontend 2/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8010 (Press CTRL+C to quit)
+INFO:     Started reloader process [39949] using StatReload
+INFO:     Started server process [39953]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING: PostgreSQL connection failed (No module named 'psycopg2'). Falling back to SQLite for local development.
+DEBUG: Application starting up and initializing DB...
+Database tables verified/created successfully!
+DEBUG: Demo user demo@example.com already exists.
+INFO:     127.0.0.1:52815 - "POST /api/login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:52819 - "POST /api/login HTTP/1.1" 401 Unauthorized
+./run_backend.sh: line 4: 39949 Killed: 9               uvicorn main:app --host 0.0.0.0 --port 8010 --reload
