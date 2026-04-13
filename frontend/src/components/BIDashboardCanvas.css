@@ -318,6 +318,41 @@
     transform: scale(0.95);
 }
 
+.bi-add-report-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dbeafe;
+    border-radius: 4px;
+    color: #3b82f6;
+    cursor: pointer;
+    transition: all 0.2s;
+    opacity: 0.8;
+    position: relative;
+    z-index: 10;
+    pointer-events: all;
+    flex-shrink: 0;
+}
+
+.bi-visual-card:hover .bi-add-report-btn {
+    opacity: 1;
+}
+
+.bi-add-report-btn:hover {
+    background: #3b82f6 !important;
+    color: #fff !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2);
+}
+
+.bi-add-report-btn:active {
+    transform: scale(0.95);
+}
+
 /* No grid-wide overrides in free-form canvas */
 
 .bi-empty-canvas {

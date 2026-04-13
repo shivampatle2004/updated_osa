@@ -28,7 +28,6 @@ def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=
             # Extract labels and values
             if isinstance(data, list) and len(data) > 0:
                 if isinstance(data[0], dict):
-                    # Get first two columns as label and value
                     keys = list(data[0].keys())
                     labels = [str(row.get(keys[0], ''))[:20] for row in data[:10]]
                     try:
@@ -72,7 +71,9 @@ def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=
         
         return buf.getvalue()
     except Exception as e:
+        import traceback
         print(f"Error generating chart: {e}")
+        traceback.print_exc()
         return None
 
 
@@ -249,19 +250,24 @@ class PaginatedReportEngine:
                 text = config.get("content", "")
                 story.append(Paragraph(text, styles['Normal']))
                 story.append(Spacer(1, 0.1 * inch))
-                
+                 
             elif el_type == "table":
                 columns = config.get("columns", [])
                 rows_per_page = config.get("rows_per_page", default_rows_per_page)
                 show_header_el = config.get("show_header", True)
+
+                table_data = config.get("table_data")
+                if table_data:
+                    data_rows = table_data
+                elif not columns:
+                    data_rows = data_provider_fn(config.get("data_source_index", 0))
+
+                if not columns and data_rows and len(data_rows) > 0:
+                    columns = list(data_rows[0].keys())
                 
                 if not columns:
                     continue
-                
-                # Get data from provider
-                data_source_index = config.get("data_source_index", 0)
-                data_rows = data_provider_fn(data_source_index)
-                
+
                 if not data_rows:
                     story.append(Paragraph("No data available.", styles['Normal']))
                     continue
@@ -337,6 +343,21 @@ class PaginatedReportEngine:
                     # Page break
                     if page_num < total_pages - 1:
                         story.append(PageBreak())
+                
+                story.append(Spacer(1, 0.2 * inch))
+
+            elif el_type == "chart":
+                chart_data = config.get("chart_data")
+                chart_type = config.get("chart_type", "bar")
+                title = config.get("title", "Chart")
+                
+                if chart_data and len(chart_data) > 0:
+                    chart_bytes = generate_chart_image(chart_data, chart_type, title)
+                    if chart_bytes:
+                        img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
+                        story.append(img)
+                else:
+                    story.append(Paragraph("No chart data available.", styles['Normal']))
                 
                 story.append(Spacer(1, 0.2 * inch))
 

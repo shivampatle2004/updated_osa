@@ -6,8 +6,10 @@ import models
 from utils.logger import get_logger
 from services.data_engine import DataEngine
 from services.report_pdf_service import sync_generate_pdf
-from fastapi.responses import FileResponse
+from services.paginated_report_engine import PaginatedReportEngine
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import os
+import io
 
 logger = get_logger("routers.reports")
 
@@ -32,6 +34,110 @@ def list_reports(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error listing reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/generate-pdf-direct")
+def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
+    """Generate PDF directly from elements with inline data."""
+    try:
+        from pydantic import BaseModel
+        from services.model_engine import ModelEngine
+        from database import SessionLocal
+        
+        class ElementWithData(BaseModel):
+            type: str
+            config: Dict[str, Any] = {}
+            data: Optional[List[Dict[str, Any]]] = None
+        
+        title = payload.get("title", "Report")
+        page_size = payload.get("page_size", "A4")
+        orientation = payload.get("orientation", "portrait")
+        elements_data = payload.get("elements", [])
+        file_id = payload.get("file_id")
+        
+        config = {
+            "page_size": page_size,
+            "orientation": orientation,
+            "header_text": title,
+            "include_summary": False,
+            "include_chart": False,
+            "rows_per_page": 30
+        }
+        
+        db = SessionLocal()
+        all_data = []
+        
+        try:
+            if file_id:
+                df = ModelEngine.load_report_dataframe(file_id, db)
+                if df is not None:
+                    df = df.where(df.notnull(), None)
+                    all_data = df.to_dict(orient="records")
+        finally:
+            db.close()
+        
+        elements = []
+        logger.info(f"Processing {len(elements_data)} elements, data available: {len(all_data) > 0}")
+        
+        for el in elements_data:
+            config_json = el.get("config", {}) or {}
+            el_type = el.get("type", "text")
+            chart_data = el.get("data")
+            
+            logger.info(f"Element type: {el_type}, has data: {chart_data is not None}")
+            
+            if not chart_data and all_data:
+                if el_type in ["bar", "line", "pie", "area", "column"]:
+                    x_field = config_json.get("xField") or config_json.get("x_axis")
+                    y_field = config_json.get("yField") or config_json.get("y_field")
+                    
+                    if x_field or y_field:
+                        chart_data = all_data[:50]
+                        config_json["chart_data"] = chart_data
+                        config_json["chart_type"] = config_json.get("chartType", el_type)
+            
+            if el_type == "table":
+                if not chart_data and all_data:
+                    chart_data = all_data
+                if chart_data:
+                    config_json["table_data"] = chart_data
+                config_json["rows_per_page"] = config_json.get("rows_per_page", 30)
+                if not config_json.get("columns") and all_data:
+                    config_json["columns"] = [{"name": c, "header": c} for c in list(all_data[0].keys())[:10]]
+            
+            if el_type == "text":
+                config_json["content"] = config_json.get("content", config_json.get("title", ""))
+            
+            elements.append({
+                "type": el_type,
+                "config_json": config_json
+            })
+        
+        def inline_data_provider(ds_index):
+            return all_data if all_data else []
+        
+        pdf_bytes = PaginatedReportEngine.generate_pdf(config, elements, inline_data_provider)
+        
+        if not pdf_bytes or len(pdf_bytes) < 100:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "PDF generation failed"}
+            )
+        
+        pdf_buffer = io.BytesIO(pdf_bytes)
+        pdf_buffer.seek(0)
+        
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={title}.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"Direct PDF generation error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
 
 @router.post("", status_code=201)
 @router.post("/create", status_code=201)
