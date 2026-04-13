@@ -475,6 +475,7 @@ class AutomateAction(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 # MODELING LAYER MODELS (Date Table & Change Detection)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -501,3 +502,72 @@ class ChangeDetectionConfig(Base):
     status = Column(String(50), default="Monitoring")  # "Monitoring", "Changed", "Error"
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+=======
+# ROW-LEVEL SECURITY (RLS) MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RLSRole(Base):
+    """
+    A named security role scoped to a specific dataset (file_id).
+    Each role owns one or more RLSRule rows that define column filters.
+    """
+    __tablename__ = "rls_roles"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    # Link to the UploadedFile / DataVault dataset this role governs
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    # Friendly identifiers
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    permission = Column(String(50), nullable=False, default="view")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    rules = relationship("RLSRule", back_populates="role", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<RLSRole(name='{self.name}', file_id='{self.file_id}')>"
+
+
+class RLSRule(Base):
+    """
+    One filter condition belonging to an RLSRole.
+
+    How AND/OR logic works:
+    - Rules with the same `logic_group` integer are combined with `group_operator` (AND / OR).
+    - Different logic_group values are combined with AND between groups.
+    - Example:
+        group 0: Region = 'West' OR Region = 'East'   → group_operator='OR', logic_group=0
+        group 1: Year > 2020                           → group_operator='AND', logic_group=1
+      Result SQL equivalent: (Region='West' OR Region='East') AND (Year>2020)
+    """
+    __tablename__ = "rls_rules"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    role_id = Column(String, ForeignKey("rls_roles.id"), nullable=False, index=True)
+
+    # Target: which table/column this filter applies to
+    table_name = Column(String(255), nullable=False)
+    column_name = Column(String(255), nullable=False)
+
+    # Operator: =, !=, >, <, >=, <=, IN, NOT IN, CONTAINS, STARTS_WITH, ENDS_WITH
+    operator = Column(String(50), nullable=False, default="=")
+
+    # Value as a string; comma-separated for IN / NOT IN
+    value = Column(Text, nullable=False)
+
+    # Logic grouping: rules in same group are joined by group_operator
+    logic_group = Column(Integer, default=0)
+    # How this rule connects to others in the same group: AND | OR
+    group_operator = Column(String(10), default="AND")
+
+    # Display order within the role editor
+    display_order = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    role = relationship("RLSRole", back_populates="rules")
+
+    def __repr__(self):
+        return f"<RLSRule({self.table_name}.{self.column_name} {self.operator} '{self.value}')>"
+>>>>>>> 1bfa371dd0fd1e1c13c2870a300651cdbd78dec0

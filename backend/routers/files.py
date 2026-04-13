@@ -2,7 +2,7 @@ import os
 import shutil
 import base64
 import math
-from fastapi import APIRouter, UploadFile as _FastAPIUploadFile, File, Depends, HTTPException, BackgroundTasks, Body, Query, Form
+from fastapi import APIRouter, UploadFile as _FastAPIUploadFile, File, Depends, HTTPException, BackgroundTasks, Body, Query, Form, Header
 from typing import Optional
 from sqlalchemy.orm import Session
 from database import SessionLocal
@@ -25,6 +25,31 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _UPLOAD_ABS = os.path.join(_BACKEND_DIR, "uploads")
 UPLOAD_DIR = _UPLOAD_ABS
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def verify_write_permission(
+    x_simulated_role: Optional[str] = Header(None, alias="X-Simulated-Role"),
+    db: Session = Depends(get_db)
+):
+    if not x_simulated_role:
+        return
+    role_ids = [r.strip() for r in x_simulated_role.split(",") if r.strip()]
+    if not role_ids:
+        return
+        
+    from models import RLSRole
+    roles = db.query(RLSRole).filter(RLSRole.id.in_(role_ids)).all()
+    if not roles:
+        return
+        
+    best = "view"
+    hierarchy = ['view', 'edit', 'view_edit']
+    for r in roles:
+        p = r.permission or "view"
+        if hierarchy.index(p) > hierarchy.index(best):
+            best = p
+            
+    if best == "view":
+        raise HTTPException(status_code=403, detail="Simulated role has 'view' access only")
 
 
 def resolve_stored_file_path(file_record: UploadedFile):
@@ -876,7 +901,11 @@ def download_file(file_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
 @router.delete("/{file_id}")
-def delete_file(file_id: str, db: Session = Depends(get_db)):
+def delete_file(
+    file_id: str, 
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
+):
     file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
@@ -897,6 +926,7 @@ def rename_file(
     payload: dict = Body(...),
     user_id: Optional[int] = Query(None, description="When set, must match file owner"),
     db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
 ):
     """Rename report file display name (does not change on-disk path)."""
     file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
@@ -916,7 +946,8 @@ def rename_file(
 def save_as_file(
     file_id: str,
     payload: dict = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
 ):
     """
     Create a new file entry duplicating an existing report (data + derived metadata + graphs),
@@ -1025,7 +1056,8 @@ def get_file_model(file_id: str, db: Session = Depends(get_db)):
 def update_file_model(
     file_id: str,
     payload: dict = Body(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
 ):
     """Save model configuration; merges with existing so SQL dataset library is not wiped by partial saves."""
     file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
