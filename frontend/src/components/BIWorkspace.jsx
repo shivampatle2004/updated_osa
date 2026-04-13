@@ -5,7 +5,7 @@ import {
   Layout, Database, Home, ChevronRight, ChevronLeft, 
   Plus, Download, Share2, MoreHorizontal, Settings, Filter, 
   Search, ChevronDown, Trash2, Copy, Trash, Maximize2, Minimize2, 
-  FileText, BarChart3, Link2
+  FileText, BarChart3, Link2, Calendar, RefreshCw, X
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -31,6 +31,10 @@ import BIConnectorsModal from './BIConnectorsModal';
 import BIConnectionConfigModal from './BIConnectionConfigModal';
 import DataVaultPanel from './DataVaultPanel';
 import PaginatedReportModal from './PaginatedReportModal';
+import { MarkDateTableModal, ChangeDetectionModal } from './ModelingModals';
+import ManageRolesPanel from './ManageRolesPanel';
+import ViewAsModal, { RLSActiveBanner } from './ViewAsModal';
+import { RLSProvider, useRLS } from '../context/RLSContext';
 
 // Services
 // import DataService from '../services/DataService'; // Assume if needed
@@ -175,6 +179,7 @@ const BIWorkspace = ({
   /** True after File → Blank report until data is loaded for the new report or user cancels. Hides the previous report UI. */
   const [isNewReportDraft, setIsNewReportDraft] = useState(false);
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [simulationData, setSimulationData] = useState({ isViewAsActive: false, activeRoles: [], effectivePermission: 'view_edit' });
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showPaginatedReportModal, setShowPaginatedReportModal] = useState(false);
@@ -199,6 +204,37 @@ const BIWorkspace = ({
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [showDataVaultPanel, setShowDataVaultPanel] = useState(false);
+  const [showMarkDateTableModal, setShowMarkDateTableModal] = useState(false);
+  const [showChangeDetectionModal, setShowChangeDetectionModal] = useState(false);
+
+  // ── RLS state ──────────────────────────────────────────────────────────────
+  const [showManageRoles, setShowManageRoles] = useState(false);
+  const [showViewAs, setShowViewAs] = useState(false);
+
+  // Inject X-Simulated-Role header into backend modifying requests
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      let [resource, config] = args;
+      // Native fetch can take Request object, but our app mainly uses fetch(url, config)
+      if (typeof resource === 'string' && config) {
+        const method = (config.method || 'GET').toUpperCase();
+        if (['PUT', 'POST', 'PATCH', 'DELETE'].includes(method)) {
+           const headers = new Headers(config.headers || {});
+           if (simulationData.isViewAsActive && simulationData.activeRoles.length > 0) {
+             headers.set('X-Simulated-Role', simulationData.activeRoles.map(r => r.id).join(','));
+           }
+           config.headers = headers;
+           args[1] = config;
+        }
+      }
+      return originalFetch.apply(this, args);
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [simulationData]);
 
   const handleAddToReport = useCallback((graph) => {
     if (!graph) return;
@@ -256,6 +292,8 @@ const BIWorkspace = ({
       .then((d) => setSqlSavedProfiles(Array.isArray(d.profiles) ? d.profiles : []))
       .catch(() => setSqlSavedProfiles([]));
   }, [showSqlModal, userId]);
+
+  // Global Change Detection Polling removed from here
 
   const handleQuickConnectSaved = async (profileId) => {
     setSqlError('');
@@ -420,8 +458,81 @@ const BIWorkspace = ({
   const [publishLink, setPublishLink] = useState('');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [modelTables, setModelTables] = useState([]);
+
   const [modelRelationships, setModelRelationships] = useState([]);
   const [modelActionRequest, setModelActionRequest] = useState(null);
+  
+  // -- State: Date Hierarchy & Filters --
+  const [dateHierarchy, setDateHierarchy] = useState(null);
+  const [dateFilter, setDateFilter] = useState({ year: null, month: null, quarter: null });
+  const [isRefreshingCharts, setIsRefreshingCharts] = useState(false);
+
+  // Global Change Detection Polling
+  useEffect(() => {
+    if (!fileId && (!modelTables || modelTables.length === 0)) return;
+    
+    // Track notified changes to prevent spam
+    const notifiedIds = new Set();
+    
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/modeling/change-detection/status');
+        if (res.ok) {
+          const data = await res.json();
+          // Filter to only configs active in the current app context
+          const currentTableIds = new Set();
+          if (fileId) currentTableIds.add(fileId);
+          if (modelTables) modelTables.forEach(t => currentTableIds.add(t.id));
+          
+          const changedConfigs = data.filter(c => 
+              currentTableIds.has(c.table_name) && 
+              c.status === 'Changed' && 
+              !notifiedIds.has(c.id)
+          );
+          
+          if (changedConfigs.length > 0) {
+            changedConfigs.forEach(c => notifiedIds.add(c.id));
+            
+            // Step 6b: Auto-refresh charts and show toast instead of alert()
+            setIsRefreshingCharts(true);
+            setTimeout(() => setIsRefreshingCharts(false), 5000);
+            
+            // Refresh visible graphs
+            const activePageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
+            const visible = activePageGraphs.filter((g) => !g?.options?.isHidden);
+            prefetchVisibleGraphData(visible, datasetTotalRows);
+            
+            // Reset status on backend
+            fetch(`/api/modeling/change-detection/reset/${changedConfigs[0].id}`, { method: 'POST' });
+          }
+        }
+      } catch (err) {
+         // ignore fetch errors on poll
+      }
+    }, 15000); // Check every 15s from the frontend
+    
+    return () => clearInterval(interval);
+  }, [fileId, modelTables, graphs, activePageId, datasetTotalRows]);
+
+  // Trigger charts refresh when date filters change
+  useEffect(() => {
+    if (!fileId || graphs.length === 0) return;
+    const activePageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
+    const visible = activePageGraphs.filter((g) => !g?.options?.isHidden);
+    prefetchVisibleGraphData(visible, datasetTotalRows);
+  }, [dateFilter]);
+
+  // Fetch Date Hierarchy
+  useEffect(() => {
+    if (!fileId) {
+      setDateHierarchy(null);
+      return;
+    }
+    fetch(`/api/modeling/date-hierarchy/${fileId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setDateHierarchy(d))
+      .catch(() => setDateHierarchy(null));
+  }, [fileId]);
   /** Server flag: blank report stub; Model view hides synthetic "main" table until real data exists. */
   const [blankReport, setBlankReport] = useState(false);
 
@@ -1188,7 +1299,10 @@ const BIWorkspace = ({
             y_axis: g.y_axis,
             aggregation: g.aggregation,
             dimension_fields: g?.options?.dimension_fields || [],
-            measure_fields: g?.options?.measure_fields || []
+            measure_fields: g?.options?.measure_fields || [],
+            year_filter: dateFilter.year,
+            month_filter: dateFilter.month,
+            quarter_filter: dateFilter.quarter
           })
         });
         if (!res.ok) return null;
@@ -1846,33 +1960,20 @@ const BIWorkspace = ({
         setActiveView('model');
         setModelActionRequest({ type: 'manage_relationships', ts: Date.now() });
         break;
-      case 'mark_date_table': {
-        setActiveView('model');
-        const tableName = prompt('Table name to mark as date table:', modelTables?.[0]?.name || fileName || 'Dataset');
-        if (!tableName) break;
-        const dateColDefault = (schema || []).find((c) => String(c?.data_type || '').toLowerCase().includes('date'))?.column_name || '';
-        const dateColumn = prompt('Date column name:', dateColDefault || '');
-        if (!dateColumn) break;
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
-        const existing = modelRes.ok ? await modelRes.json() : {};
-        const dt = Array.isArray(existing?.date_tables) ? existing.date_tables : [];
-        const next = [...dt.filter((x) => !(x?.table === tableName)), { table: tableName, date_column: dateColumn }];
-        await patchModelConfig({ date_tables: next });
-        alert(`Marked "${tableName}" as date table using "${dateColumn}".`);
+      case 'mark_date_table':
+        if (!fileId) {
+          alert('Please load a dataset first before marking a Date Table.');
+          return;
+        }
+        setShowMarkDateTableModal(true);
         break;
-      }
-      case 'change_detection': {
-        setActiveView('model');
-        const table = prompt('Change detection table:', modelTables?.[0]?.name || fileName || 'Dataset');
-        if (!table) break;
-        const column = prompt('Change detection column (timestamp/version):', '');
-        if (!column) break;
-        const interval = prompt('Refresh interval in seconds:', '30');
-        const intervalSec = Math.max(5, Number(interval) || 30);
-        await patchModelConfig({ change_detection: { enabled: true, table, column, interval_seconds: intervalSec } });
-        alert('Change detection settings saved.');
+      case 'change_detection':
+        if (!fileId) {
+          alert('Please load a dataset first to configure change detection.');
+          return;
+        }
+        setShowChangeDetectionModal(true);
         break;
-      }
       case 'param_numeric': {
         setActiveView('model');
         const name = prompt('Numeric parameter name:', 'WhatIf');
@@ -1904,29 +2005,12 @@ const BIWorkspace = ({
         alert(`Field parameter "${name.trim()}" created.`);
         break;
       }
-      case 'manage_roles': {
-        setActiveView('model');
-        const role = prompt('Role name:', 'Viewer');
-        if (!role) break;
-        const filter = prompt('Row filter expression (optional):', '');
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
-        const existing = modelRes.ok ? await modelRes.json() : {};
-        const prev = Array.isArray(existing?.roles) ? existing.roles : [];
-        const next = [...prev.filter((r) => r?.name !== role.trim()), { name: role.trim(), filter: filter || '' }];
-        await patchModelConfig({ roles: next });
-        alert(`Role "${role.trim()}" saved.`);
+      case 'manage_roles':
+        setShowManageRoles(true);
         break;
-      }
-      case 'view_as': {
-        setActiveView('model');
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
-        const existing = modelRes.ok ? await modelRes.json() : {};
-        const roleName = prompt('View as role:', (existing?.roles || [])[0]?.name || '');
-        if (!roleName) break;
-        await patchModelConfig({ view_as_role: roleName.trim() });
-        alert(`View as "${roleName.trim()}" enabled.`);
+      case 'view_as':
+        setShowViewAs(true);
         break;
-      }
       case 'qna_setup':
       case 'qna_language':
       case 'qna_schema': {
@@ -2061,6 +2145,7 @@ const BIWorkspace = ({
         setReportHeaderText(trimmedHeader || REPORT_HEADER_PLACEHOLDER);
         break;
       }
+
       default:
         console.log("Ribbon Action:", actionId, args);
     }
@@ -2767,6 +2852,9 @@ const BIWorkspace = ({
       const params = new URLSearchParams();
       params.set('fileId', String(fileId));
       if (fileName) params.set('fileName', fileName);
+      if (simulationData.isViewAsActive && simulationData.activeRoles.length > 0) {
+        params.set('simulateRole', simulationData.activeRoles.map(r => r.id).join(','));
+      }
       const liveLink = `${window.location.origin}/?${params.toString()}`;
 
       setIsPublishing(false);
@@ -2842,6 +2930,8 @@ const BIWorkspace = ({
       </div>
     );
   }
+
+  const isViewOnly = simulationData.effectivePermission === 'view';
 
   return (
     <div className={`bi-workspace-root ${reportTheme === 'theme_dark' ? 'dark-theme' : ''} ${reportTheme} ${isMobileLayout ? 'bi-mobile-layout' : ''}`}>
@@ -3185,8 +3275,9 @@ const BIWorkspace = ({
         />
       )}
 
-      {/* Top Ribbon */}
-      <BIRibbon
+      {/* Top Ribbon - hidden in view only mode */}
+      {!isViewOnly && (
+        <BIRibbon
         activeTab={ribbonTab}
         setActiveTab={setRibbonTab}
         onAction={handleRibbonAction}
@@ -3200,7 +3291,18 @@ const BIWorkspace = ({
         onUpdateColumn={(colName, updates) => {
           setSchema(prev => prev.map(c => c.column_name === colName ? { ...c, ...updates } : c));
         }}
+        dateHierarchy={dateHierarchy}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
       />
+      )}
+
+      {isRefreshingCharts && (
+        <div className="osa-refresh-toast">
+          <RefreshCw size={16} className="spin" />
+          <span>Refreshing charts with new data...</span>
+        </div>
+      )}
 
       {datasetLoadError && (
         <div className="bi-dataset-warn-banner" role="alert">
@@ -3230,13 +3332,15 @@ const BIWorkspace = ({
             <Table size={20} />
           </div>
           */}
-          <div 
-            className={`bi-view-icon ${activeView === 'model' ? 'active' : ''}`} 
-            onClick={() => setActiveView('model')} 
-            title="Model View"
-          >
-            <Database size={20} />
-          </div>
+          {!isViewOnly && (
+            <div 
+              className={`bi-view-icon ${activeView === 'model' ? 'active' : ''}`} 
+              onClick={() => setActiveView('model')} 
+              title="Model View"
+            >
+              <Database size={20} />
+            </div>
+          )}
           {/* Catalog full-page tab is not needed (Catalog exists in Model view)
           <div 
             className={`bi-view-icon ${activeView === 'catalog' ? 'active' : ''}`} 
@@ -3246,13 +3350,15 @@ const BIWorkspace = ({
             <FileText size={20} />
           </div>
           */}
-          <div
-            className={`bi-view-icon ${activeView === 'connections' ? 'active' : ''}`}
-            onClick={() => setActiveView('connections')}
-            title="Connections"
-          >
-            <Link2 size={20} />
-          </div>
+          {!isViewOnly && (
+            <div
+              className={`bi-view-icon ${activeView === 'connections' ? 'active' : ''}`}
+              onClick={() => setActiveView('connections')}
+              title="Connections"
+            >
+              <Link2 size={20} />
+            </div>
+          )}
           
           <div className="bi-view-icon bi-home-icon" onClick={() => onGoHome ? onGoHome() : navigate('/')} title="Go Home">
             <Home size={20} />
@@ -3491,10 +3597,15 @@ const BIWorkspace = ({
                         dragOverItemIndex={dragOverItemIndex}
                         onButtonAction={handleButtonAction}
                         onDeselectVisual={() => setActiveVisualId(null)}
+<<<<<<< HEAD
                         onAddToReport={handleAddToReport}
                         showGridlines={showGridlines}
+=======
+                        showGridlines={showGridlines && !isViewOnly}
+>>>>>>> 0ce892256db8838bc7a3816997d48f23d77638aa
                         snapToGrid={snapToGrid}
-                        lockObjects={lockObjects}
+                        lockObjects={lockObjects || isViewOnly}
+                        isViewOnly={isViewOnly}
                         reportTheme={reportTheme}
                         reportHeaderText={reportHeaderText}
                         onUpdateReportHeader={(nextHeader) => {
@@ -3734,15 +3845,17 @@ const BIWorkspace = ({
                           key={page.id}
                           className={`bi-page-tab ${activePageId === page.id ? 'active' : ''}`}
                           onClick={() => navigateToPage(page.id, true)}
-                          onDoubleClick={() => handleRenamePage(page.id)}
+                          onDoubleClick={() => !isViewOnly && handleRenamePage(page.id)}
                         >
                           <span className="bi-page-tab-name">{page.name}</span>
-                          {pages.length > 1 && (
+                          {pages.length > 1 && !isViewOnly && (
                             <button className="bi-page-tab-close" onClick={(e) => { e.stopPropagation(); handleDeletePage(page.id); }}>✕</button>
                           )}
                         </div>
                       ))}
-                      <button className="bi-page-add-btn" onClick={handleAddPage}><Plus size={14} /></button>
+                      {!isViewOnly && (
+                        <button className="bi-page-add-btn" onClick={handleAddPage}><Plus size={14} /></button>
+                      )}
                     </div>
                     <div className="bi-status-right">
                       {fileDetails?.created_at && (
@@ -3755,39 +3868,43 @@ const BIWorkspace = ({
                 </div>
               </Panel>
 
-              <PanelResizeHandle className="bi-resizer" />
+              {!isViewOnly && (
+                <>
+                  <PanelResizeHandle className="bi-resizer" />
 
-              {/* Right Panel: Tools */}
-              <Panel
-                ref={rightPanesPanelRef}
-                defaultSize={20}
-                minSize={10}
-                collapsible={true}
-                onCollapse={() => setIsRightPanesCollapsed(true)}
-                onExpand={() => setIsRightPanesCollapsed(false)}
-              >
-                <BIRightPanes
-                  schema={schema}
-                  dataset={dataset}
-                  fileName={fileName}
-                  selectedVisual={activePageGraphs.find(g => g.id === activeVisualId)}
-                  isCollapsed={isRightPanesCollapsed}
-                  onToggleCollapse={() => isRightPanesCollapsed ? rightPanesPanelRef.current?.expand() : rightPanesPanelRef.current?.collapse()}
-                  onUpdateVisual={applyVisualUpdate}
-                  onAddVisual={handleAddVisual}
-                  measures={measures}
-                  forcedActiveTab={rightPaneTab}
-                  onActiveTabChange={setRightPaneTab}
-                  activeColumn={activeColumn}
-                  onSelectColumn={(col) => {
-                    setActiveColumn(col);
-                    setRibbonTab('Column tools');
-                    if (col?.column_name) {
-                      setSelectedData({ kind: 'field', columnName: col.column_name });
-                    }
-                  }}
-                />
-              </Panel>
+                  {/* Right Panel: Tools */}
+                  <Panel
+                    ref={rightPanesPanelRef}
+                    defaultSize={20}
+                    minSize={10}
+                    collapsible={true}
+                    onCollapse={() => setIsRightPanesCollapsed(true)}
+                    onExpand={() => setIsRightPanesCollapsed(false)}
+                  >
+                    <BIRightPanes
+                      schema={schema}
+                      dataset={dataset}
+                      fileName={fileName}
+                      selectedVisual={activePageGraphs.find(g => g.id === activeVisualId)}
+                      isCollapsed={isRightPanesCollapsed}
+                      onToggleCollapse={() => isRightPanesCollapsed ? rightPanesPanelRef.current?.expand() : rightPanesPanelRef.current?.collapse()}
+                      onUpdateVisual={applyVisualUpdate}
+                      onAddVisual={handleAddVisual}
+                      measures={measures}
+                      forcedActiveTab={rightPaneTab}
+                      onActiveTabChange={setRightPaneTab}
+                      activeColumn={activeColumn}
+                      onSelectColumn={(col) => {
+                        setActiveColumn(col);
+                        setRibbonTab('Column tools');
+                        if (col?.column_name) {
+                          setSelectedData({ kind: 'field', columnName: col.column_name });
+                        }
+                      }}
+                    />
+                  </Panel>
+                </>
+              )}
             </PanelGroup>
           </div>
         )}
@@ -3882,10 +3999,36 @@ const BIWorkspace = ({
         isOpen={showPaginatedReportModal}
         onClose={() => setShowPaginatedReportModal(false)}
         fileId={fileId}
+<<<<<<< HEAD
         dataset={dataset}
         fileName={fileName}
         reportElements={reportElements}
         onReportElementsChange={setReportElements}
+=======
+        userId={userId}
+      />
+      <MarkDateTableModal
+        isOpen={showMarkDateTableModal}
+        onClose={() => setShowMarkDateTableModal(false)}
+        schema={schema}
+        fileId={fileId}
+        modelTables={modelTables}
+        onSuccess={() => {
+          setShowMarkDateTableModal(false);
+          setRibbonTab('Home');
+        }}
+      />
+      <ChangeDetectionModal
+        isOpen={showChangeDetectionModal}
+        onClose={() => setShowChangeDetectionModal(false)}
+        schema={schema}
+        fileId={fileId}
+        modelTables={modelTables}
+        onSuccess={() => {
+          setShowChangeDetectionModal(false);
+          setRibbonTab('Home');
+        }}
+>>>>>>> 0ce892256db8838bc7a3816997d48f23d77638aa
       />
       <BIConnectorsModal
         isOpen={showConnectorsModal}
@@ -3898,6 +4041,23 @@ const BIWorkspace = ({
         connector={selectedConnector}
         userId={userId}
       />
+      {/* ── RLS: Manage Roles Panel ── */}
+      {showManageRoles && (
+        <ManageRolesPanel
+          fileId={fileId}
+          onClose={() => setShowManageRoles(false)}
+        />
+      )}
+
+      {/* ── RLS: View As — always mounted so banner persists after modal closes ── */}
+      <ViewAsModalWithBanner
+        fileId={fileId}
+        showModal={showViewAs}
+        onClose={() => setShowViewAs(false)}
+        onOpenManageRoles={() => { setShowViewAs(false); setShowManageRoles(true); }}
+        onSimulationChange={setSimulationData}
+      />
+
       <DataVaultPanel
         isOpen={showDataVaultPanel}
         onClose={() => setShowDataVaultPanel(false)}
@@ -3982,5 +4142,70 @@ const ModalPortal = ({ isVisible, onClose, title, children }) => {
     </div>
   );
 };
+
+// ── RLS: ViewAsModalWithBanner ────────────────────────────────────────────────
+// Always mounted (not conditional) so the banner stays visible after closing
+// the picker. Wraps its own RLSProvider.
+
+function ViewAsModalWithBanner({ fileId, showModal, onClose, onOpenManageRoles, onSimulationChange }) {
+  return (
+    <RLSProvider fileId={fileId}>
+      <ViewAsModalInner
+        fileId={fileId}
+        showModal={showModal}
+        onClose={onClose}
+        onOpenManageRoles={onOpenManageRoles}
+        onSimulationChange={onSimulationChange}
+      />
+    </RLSProvider>
+  );
+}
+
+// Inner component can safely call useRLS() because it lives inside RLSProvider
+function ViewAsModalInner({ fileId, showModal, onClose, onOpenManageRoles, onSimulationChange }) {
+  const { activeRoles, isViewAsActive, rlsData, clearViewAs, effectivePermission, setActiveRoles } = useRLS();
+
+  useEffect(() => {
+    if (onSimulationChange) {
+      onSimulationChange({ isViewAsActive, activeRoles, effectivePermission });
+    }
+  }, [isViewAsActive, activeRoles, effectivePermission, onSimulationChange]);
+
+  // Read `simulateRole` from URL on load
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const simulateRoleIds = urlParams.get('simulateRole');
+    if (simulateRoleIds && fileId && !isViewAsActive) {
+       import('../services/rlsService').then(({ getRoles }) => {
+          getRoles(fileId).then(roles => {
+             const active = roles.filter(r => simulateRoleIds.split(',').includes(String(r.id)));
+             if (active.length > 0) setActiveRoles(active);
+          }).catch(() => {});
+       });
+    }
+  }, [fileId]); // Run once when fileId is loaded
+
+  return (
+    <>
+      {/* Orange banner shown across the top when a role simulation is active */}
+      {isViewAsActive && (
+        <RLSActiveBanner
+          activeRoles={activeRoles}
+          rlsData={rlsData}
+          onExit={clearViewAs}
+        />
+      )}
+
+      {/* Picker modal — only mounted when the user opens "View As" from the ribbon */}
+      {showModal && (
+        <ViewAsModal
+          fileId={fileId}
+          onClose={onClose}
+          onOpenManageRoles={onOpenManageRoles}
+        />
+      )}
+    </>
+  );
+}
 
 export default BIWorkspace;

@@ -1,0 +1,321 @@
+/* ViewAsModal.css */
+
+/* ── Overlay ──────────────────────────────────────────────────────────────── */
+.vam-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.30);
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: vam-fade 0.15s ease;
+}
+@keyframes vam-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+.vam-modal {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.22);
+  width: min(94vw, 440px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: vam-up 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes vam-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.vam-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #e8e8f0;
+  background: linear-gradient(135deg, #f0fdf4 0%, #fff 60%);
+}
+
+.vam-header-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #059669, #10b981);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.vam-header-text h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #064e3b;
+  margin: 0;
+}
+.vam-header-text p {
+  font-size: 11.5px;
+  color: #6b7280;
+  margin: 2px 0 0;
+}
+
+.vam-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 5px;
+  border-radius: 6px;
+  display: flex;
+  transition: background 0.15s, color 0.15s;
+}
+.vam-close-btn:hover { background: #f3f4f6; color: #374151; }
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+.vam-body { padding: 18px 20px; }
+
+.vam-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9ca3af;
+  margin-bottom: 10px;
+}
+
+/* None option */
+.vam-option-none {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+  margin-bottom: 6px;
+}
+.vam-option-none:hover { background: #f9fafb; }
+.vam-option-none.selected {
+  background: #f0fdf4;
+  border-color: #10b981;
+}
+.vam-option-none-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.vam-option-none-sub {
+  font-size: 11.5px;
+  color: #9ca3af;
+}
+
+/* Roles list */
+.vam-roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.vam-role-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1.5px solid #e5e7eb;
+  transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+}
+.vam-role-option:hover { background: #f9fafb; border-color: #c4b5fd; }
+.vam-role-option.checked {
+  background: #f5f3ff;
+  border-color: #7c3aed;
+}
+
+.vam-checkbox {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 2px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
+  background: #fff;
+}
+.vam-role-option.checked .vam-checkbox {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+
+.vam-role-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #ddd6fe, #c4b5fd);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.vam-role-info { flex: 1; min-width: 0; }
+.vam-role-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vam-role-sub {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.vam-no-roles {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+  padding: 24px 0;
+}
+.vam-no-roles a {
+  color: #7c3aed;
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
+}
+.vam-no-roles a:hover { text-decoration: underline; }
+
+/* ── Error / info banner ─────────────────────────────────────────────────── */
+.vam-info-banner {
+  margin-top: 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #92400e;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.vam-error-banner {
+  margin-top: 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.vam-footer {
+  padding: 14px 20px 18px;
+  border-top: 1px solid #e8e8f0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.vam-apply-btn {
+  padding: 9px 22px;
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.vam-apply-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+.vam-apply-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.vam-cancel-btn {
+  padding: 9px 18px;
+  background: none;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.vam-cancel-btn:hover { border-color: #9ca3af; }
+
+.vam-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: vspin 0.7s linear infinite;
+}
+@keyframes vspin { to { transform: rotate(360deg); } }
+
+/* ── Active Banner (shown in workspace when View As is on) ───────────────── */
+.rls-active-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  background: linear-gradient(90deg, #d97706, #f59e0b);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 10px rgba(217, 119, 6, 0.35);
+  animation: banner-in 0.2s ease;
+}
+@keyframes banner-in { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
+.rls-active-banner svg { flex-shrink: 0; }
+
+.rls-active-banner-roles {
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+.rls-active-banner-exit {
+  margin-left: auto;
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.rls-active-banner-exit:hover { background: rgba(255,255,255,0.35); }
+
+.rls-stats-chip {
+  background: rgba(255,255,255,0.2);
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+}

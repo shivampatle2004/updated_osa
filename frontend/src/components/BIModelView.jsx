@@ -142,6 +142,25 @@ const BIModelView = ({
             return true;
         }
     });
+
+    const [dateTables, setDateTables] = useState({});
+
+    React.useEffect(() => {
+        const fetchDateTables = async () => {
+            try {
+                const res = await fetch('/api/modeling/date-tables');
+                if (res.ok) {
+                    const data = await res.json();
+                    const mapping = {};
+                    data.forEach(dt => { mapping[dt.table_name] = dt.date_column; });
+                    setDateTables(mapping);
+                }
+            } catch (err) {
+                console.error("Failed to fetch date tables", err);
+            }
+        };
+        fetchDateTables();
+    }, []);
     const toggleSqlDatasetsPanel = useCallback(() => {
         setSqlDatasetsPanelCollapsed((prev) => {
             const next = !prev;
@@ -1156,6 +1175,7 @@ const BIModelView = ({
                                 <span className="bi-model-table-icon" aria-hidden>🗄️</span>
                                 <span className="bi-model-table-name" title={table.name}>
                                     {table.name}
+                                    {dateTables[table.id] && <span className="bi-model-date-table-badge" title={`Date Table: ${dateTables[table.id]}`}>✅</span>}
                                 </span>
                             </div>
                             <div className="bi-model-table-header-right">
