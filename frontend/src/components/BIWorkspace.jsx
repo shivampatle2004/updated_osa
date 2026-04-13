@@ -31,13 +31,10 @@ import BIConnectorsModal from './BIConnectorsModal';
 import BIConnectionConfigModal from './BIConnectionConfigModal';
 import DataVaultPanel from './DataVaultPanel';
 import PaginatedReportModal from './PaginatedReportModal';
-<<<<<<< HEAD
 import { MarkDateTableModal, ChangeDetectionModal } from './ModelingModals';
-=======
 import ManageRolesPanel from './ManageRolesPanel';
 import ViewAsModal, { RLSActiveBanner } from './ViewAsModal';
 import { RLSProvider, useRLS } from '../context/RLSContext';
->>>>>>> 1bfa371dd0fd1e1c13c2870a300651cdbd78dec0
 
 // Services
 // import DataService from '../services/DataService'; // Assume if needed
@@ -206,10 +203,9 @@ const BIWorkspace = ({
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [showDataVaultPanel, setShowDataVaultPanel] = useState(false);
-<<<<<<< HEAD
   const [showMarkDateTableModal, setShowMarkDateTableModal] = useState(false);
   const [showChangeDetectionModal, setShowChangeDetectionModal] = useState(false);
-=======
+
   // ── RLS state ──────────────────────────────────────────────────────────────
   const [showManageRoles, setShowManageRoles] = useState(false);
   const [showViewAs, setShowViewAs] = useState(false);
@@ -238,7 +234,6 @@ const BIWorkspace = ({
       window.fetch = originalFetch;
     };
   }, [simulationData]);
->>>>>>> 1bfa371dd0fd1e1c13c2870a300651cdbd78dec0
 
   // Auto-update port based on DB type for SQL Modal
   useEffect(() => {
