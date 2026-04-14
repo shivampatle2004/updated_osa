@@ -191,7 +191,7 @@
 
 .bi-ribbon-tab.active {
     /* background-color: #fff; */
-    color: #00b1d4;
+    color: #744ec2;
     font-weight: 400;
     /* border-top: 1px solid #d1d1d1;
     border-left: 1px solid #d1d1d1;
@@ -209,7 +209,7 @@
 
 .bi-context-tab-active {
     border-top: 2px solid #f1f6f6 !important;
-    color: #14b1c9 !important;
+    color: #744ec2 !important;
 }
 
 /* Base ribbon inputs */
@@ -246,7 +246,7 @@
 }
 
 .bi-dropdown-select:focus {
-    border-color: #0078d4;
+    border-color: #744ec2;
 }
 
 /* Tiny action buttons inside ribbon ($ % ,) */
@@ -362,7 +362,7 @@
 }
 
 .bi-tool-large svg {
-    color: #0078d4;
+    color: #744ec2;
     width: 18px;
     height: 18px;
     stroke-width: 1.7;
@@ -396,7 +396,7 @@
 }
 
 .bi-ribbon-tool-small svg {
-    color: #0078d4;
+    color: #744ec2;
     width: 12px;
     height: 12px;
     stroke-width: 1.8;
@@ -448,7 +448,7 @@
 }
 
 .bi-dropdown-item-icon {
-    color: #0078d4;
+    color: #744ec2;
     display: flex;
     align-items: center;
     flex-shrink: 0;
@@ -495,13 +495,13 @@
 }
 
 .bi-theme-thumbnail:hover {
-    border-color: #0078d4;
+    border-color: #744ec2;
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .bi-theme-thumbnail.active {
-    border-color: #0078d4;
+    border-color: #744ec2;
     border-width: 2px;
 }
 
@@ -519,7 +519,7 @@
 }
 
 .bi-ribbon-select:focus {
-    border-color: #3b82f6;
+    border-color: #744ec2;
 }
 
 .osa-ribbon-reset {

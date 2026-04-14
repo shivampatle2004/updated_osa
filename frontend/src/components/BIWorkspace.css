@@ -112,9 +112,9 @@
 }
 
 .bi-view-icon.active {
-  background-color: #eff6ff;
-  color: #2563eb;
-  border-left: 3px solid #0078d4;
+  background-color: #f5f0ff;
+  color: #744ec2;
+  border-left: 3px solid #744ec2;
   border-radius: 0 4px 4px 0;
   width: 40px;
   margin-left: -2px;
@@ -255,7 +255,7 @@
 .bi-pane-action-btn {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  background: #2563eb;
+  background: #744ec2;
   color: #fff;
   font-size: 12px;
   font-weight: 600;
@@ -294,7 +294,7 @@
 .bi-pane-link {
   border: none;
   background: transparent;
-  color: #2563eb;
+  color: #744ec2;
   cursor: pointer;
   font-size: 12px;
   padding: 0;
@@ -326,7 +326,7 @@
 }
 
 .bi-pane-list-row.active {
-  background: #eff6ff;
+  background: #f5f0ff;
   border-radius: 6px;
   padding: 8px 8px;
 }
@@ -544,7 +544,8 @@
   justify-content: center;
   z-index: 12000;
   backdrop-filter: blur(2px);
-  padding: 12px;
+  -webkit-backdrop-filter: blur(2px);
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
 }
 
 .sql-modal {
@@ -557,6 +558,222 @@
   border: 1px solid #e5e7eb;
   animation: sqlModalFadeIn 180ms ease-out;
   transform-origin: center;
+}
+
+/* Wide dialog: sidebar + full-width form (matches other app modals) */
+.sql-modal.sql-modal--split {
+  width: min(1320px, calc(100vw - 24px));
+  max-width: min(1320px, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+  width: 54%;
+  display: flex;
+  flex-direction: column;
+  max-height: min(92vh, 900px);
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28);
+}
+
+.sql-modal--split .sql-modal-header {
+  padding: 18px 24px 16px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid #e8ecf1;
+  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
+}
+
+.sql-modal--split .sql-modal-title {
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.sql-modal--split .sql-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sql-modal-split {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1;
+  min-height: min(420px, 55vh);
+}
+
+.sql-sidebar {
+  width: 300px;
+  min-width: 260px;
+  max-width: 34%;
+  flex-shrink: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px 16px 22px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-right: 1px solid #e2e8f0;
+}
+
+.sql-sidebar .sql-recent-block {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.sql-sidebar .sql-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.sql-sidebar .sql-recent-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.sql-main-fields {
+  flex: 1 1 auto;
+  min-width: min(480px, 100%);
+  padding: 20px 28px 24px;
+  overflow-x: auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+}
+
+.sql-main-fields .sql-form-row {
+  grid-template-columns: repeat(2, minmax(0, 360px));
+  gap: 10px 14px;
+  width: fit-content;
+  max-width: 94%;
+  justify-content: start;
+}
+
+.sql-main-fields .sql-form-group {
+  min-width: 0;
+  align-items: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Base geometry for each explicitly targeted field control */
+.sql-main-fields .sql-input-connection-name,
+.sql-main-fields .sql-select-db-type,
+.sql-main-fields .sql-input-port,
+.sql-main-fields .sql-input-server,
+.sql-main-fields .sql-input-database,
+.sql-main-fields .sql-input-username,
+.sql-main-fields .sql-input-password,
+.sql-main-fields .sql-select-ssl-mode {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 14px;
+  line-height: 1.25;
+  border-radius: 10px;
+}
+
+/* Independent widths: change one without affecting others */
+.sql-main-fields .sql-input-connection-name { max-width: 360px; width: 376px;}
+.sql-main-fields .sql-select-db-type { max-width: 360px; width: 180px;}
+.sql-main-fields .sql-input-port { max-width: 220px; }
+.sql-main-fields .sql-input-server { max-width: 360px; }
+.sql-main-fields .sql-input-database { max-width: 360px; }
+.sql-main-fields .sql-input-username { max-width: 360px; }
+.sql-main-fields .sql-input-password { max-width: 360px; }
+.sql-main-fields .sql-select-ssl-mode { max-width: 170px; width: 180px; }
+
+.sql-main-fields .sql-select-db-type,
+.sql-main-fields .sql-select-ssl-mode {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M3 4.5 6 8l3-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+.sql-main-fields input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.sql-main-fields input[type="number"]::-webkit-outer-spin-button,
+.sql-main-fields input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.sql-main-fields .sql-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.sql-main-fields .sql-modal-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  flex-shrink: 0;
+  margin-right: 40px;
+  border-top: 1px solid #f1f5f9;
+}
+
+@media (max-width: 900px) {
+  .sql-modal.sql-modal--split {
+    width: calc(100vw - 24px);
+    max-width: 100%;
+    max-height: 94vh;
+  }
+
+  .sql-main-fields .sql-form-row {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .sql-main-fields .sql-input-connection-name,
+  .sql-main-fields .sql-select-db-type,
+  .sql-main-fields .sql-input-port,
+  .sql-main-fields .sql-input-server,
+  .sql-main-fields .sql-input-database,
+  .sql-main-fields .sql-input-username,
+  .sql-main-fields .sql-input-password,
+  .sql-main-fields .sql-select-ssl-mode {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .sql-modal-split {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sql-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .sql-main-fields {
+    min-width: 0;
+    padding: 16px 18px 20px;
+  }
 }
 
 .sql-modal-header {
@@ -677,8 +894,8 @@
 
 .sql-input:focus,
 .sql-select:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.35);
+  border-color: #744ec2;
+  box-shadow: 0 0 0 1px rgba(116, 78, 194, 0.35);
 }
 
 .sql-modal-footer {
@@ -699,13 +916,13 @@
 }
 
 .sql-btn-primary {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: #744ec2;
   color: #ffffff;
-  box-shadow: 0 10px 18px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 10px 18px rgba(116, 78, 194, 0.35);
 }
 
 .sql-btn-primary:hover {
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: #744ec2;
 }
 
 .sql-btn-primary:disabled {
@@ -840,7 +1057,7 @@
 }
 
 .osa-filter-group select:focus {
-  border-color: #3b82f6;
+  border-color: #744ec2;
 }
 
 .osa-filter-reset {
@@ -945,7 +1162,7 @@
 }
 
 .bi-btn-primary {
-  background: #0078d4;
+  background: #744ec2;
   color: white;
   border: none;
   padding: 8px 16px;
@@ -956,7 +1173,7 @@
 }
 
 .bi-btn-primary:hover {
-  background: #106ebe;
+  background: #744ec2;
 }
 
 .bi-btn-secondary {
@@ -977,7 +1194,7 @@
   width: 40px;
   height: 40px;
   border: 4px solid #f3f3f3;
-  border-top: 4px solid #0078d4;
+  border-top: 4px solid #744ec2;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -1063,7 +1280,7 @@
 
 .grid-cell-input:focus {
   background: #f1f5f9;
-  box-shadow: inset 0 0 0 2px #3b82f6;
+  box-shadow: inset 0 0 0 2px #744ec2;
 }
 
 .enter-data-actions {

@@ -15,6 +15,16 @@ logger = get_logger("routers.reports")
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
+
+def _cap_row_list(data_list, cap: int):
+    """Limit list length for PDF charts / fallbacks (matches Rows per page setting)."""
+    if not isinstance(data_list, list) or not data_list:
+        return data_list
+    cap = max(1, min(int(cap), 50_000))
+    if len(data_list) <= cap:
+        return data_list
+    return data_list[:cap]
+
 def get_db():
     db = SessionLocal()
     try:
@@ -53,14 +63,21 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
         orientation = payload.get("orientation", "portrait")
         elements_data = payload.get("elements", [])
         file_id = payload.get("file_id")
-        
+        include_summary = bool(payload.get("include_summary", False))
+        rows_per_page_req = max(1, min(int(payload.get("rows_per_page", 30) or 30), 50_000))
+        dataset_row_count = payload.get("dataset_row_count")
+        selected_columns_count = payload.get("selected_columns_count")
+        row_cap = rows_per_page_req
+
         config = {
             "page_size": page_size,
             "orientation": orientation,
             "header_text": title,
-            "include_summary": False,
+            "include_summary": include_summary,
             "include_chart": False,
-            "rows_per_page": 30
+            "rows_per_page": rows_per_page_req,
+            "dataset_row_count": dataset_row_count,
+            "selected_columns_count": selected_columns_count,
         }
         
         db = SessionLocal()
@@ -76,45 +93,78 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
             db.close()
         
         elements = []
-        logger.info(f"Processing {len(elements_data)} elements, data available: {len(all_data) > 0}")
-        
+        logger.info(
+            "Processing %s incoming elements (row_cap=%s), dataframe rows: %s",
+            len(elements_data),
+            row_cap,
+            len(all_data),
+        )
+
         for el in elements_data:
-            config_json = el.get("config", {}) or {}
+            config_json = dict(el.get("config", {}) or {})
             el_type = el.get("type", "text")
-            chart_data = el.get("data")
-            
-            logger.info(f"Element type: {el_type}, has data: {chart_data is not None}")
-            
-            if not chart_data and all_data:
-                if el_type in ["bar", "line", "pie", "area", "column"]:
-                    x_field = config_json.get("xField") or config_json.get("x_axis")
-                    y_field = config_json.get("yField") or config_json.get("y_field")
-                    
-                    if x_field or y_field:
-                        chart_data = all_data[:50]
-                        config_json["chart_data"] = chart_data
-                        config_json["chart_type"] = config_json.get("chartType", el_type)
-            
-            if el_type == "table":
-                if not chart_data and all_data:
-                    chart_data = all_data
+            if isinstance(el_type, str):
+                el_type = el_type.strip().lower()
+            inline_data = el.get("data")
+
+            logger.info(f"Element type: {el_type}, has inline data: {inline_data is not None}")
+
+            # ── Charts: modal sends type "chart" with chartType inside config ──
+            if el_type == "chart":
+                ct = (config_json.get("chartType") or config_json.get("chart_type") or "bar").lower()
+                if ct == "column":
+                    ct = "bar"
+                config_json["chart_type"] = ct
+                chart_data = inline_data
                 if chart_data:
-                    config_json["table_data"] = chart_data
-                config_json["rows_per_page"] = config_json.get("rows_per_page", 30)
-                if not config_json.get("columns") and all_data:
-                    config_json["columns"] = [{"name": c, "header": c} for c in list(all_data[0].keys())[:10]]
-            
+                    config_json["chart_data"] = _cap_row_list(chart_data, row_cap)
+                elif all_data:
+                    config_json["chart_data"] = _cap_row_list(all_data, row_cap)
+            elif el_type in ("bar", "line", "pie", "area", "column"):
+                ct = el_type if el_type != "column" else "bar"
+                config_json["chart_type"] = config_json.get("chartType") or ct
+                chart_data = inline_data
+                if chart_data:
+                    config_json["chart_data"] = _cap_row_list(chart_data, row_cap)
+                elif all_data and (config_json.get("xField") or config_json.get("x_axis") or config_json.get("yField") or config_json.get("y_axis")):
+                    config_json["chart_data"] = _cap_row_list(all_data, row_cap)
+                elif all_data:
+                    config_json["chart_data"] = _cap_row_list(all_data, row_cap)
+
+            if el_type == "table":
+                table_rows = inline_data
+                if not table_rows and all_data:
+                    table_rows = all_data
+                col_specs = config_json.get("columns") or []
+                col_names = []
+                for c in col_specs:
+                    if isinstance(c, dict):
+                        n = c.get("name") or c.get("header")
+                        if n:
+                            col_names.append(n)
+                    elif isinstance(c, str):
+                        col_names.append(c)
+                if table_rows and col_names:
+                    table_rows = [{k: row.get(k) for k in col_names} for row in table_rows]
+                if table_rows:
+                    config_json["table_data"] = _cap_row_list(table_rows, row_cap)
+                config_json["rows_per_page"] = config_json.get("rows_per_page", rows_per_page_req)
+                if not config_json.get("columns") and table_rows:
+                    config_json["columns"] = [{"name": c, "header": c} for c in list(table_rows[0].keys())[:20]]
+
             if el_type == "text":
                 config_json["content"] = config_json.get("content", config_json.get("title", ""))
-            
+
             elements.append({
                 "type": el_type,
-                "config_json": config_json
+                "config_json": config_json,
             })
-        
+
+        logger.info("Built %s PDF elements: %s", len(elements), [e.get("type") for e in elements])
+
         def inline_data_provider(ds_index):
             return all_data if all_data else []
-        
+
         pdf_bytes = PaginatedReportEngine.generate_pdf(config, elements, inline_data_provider)
         
         if not pdf_bytes or len(pdf_bytes) < 100:

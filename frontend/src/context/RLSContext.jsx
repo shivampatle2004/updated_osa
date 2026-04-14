@@ -24,13 +24,14 @@ const RLSContext = createContext({
   rlsLoading: false,
   rlsError: null,
   effectivePermission: 'view_edit',
+  isShareLocked: false,
   setActiveRoles: async () => {},
   clearViewAs: () => {},
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
-export function RLSProvider({ children, fileId }) {
+export function RLSProvider({ children, fileId, shareLocked = false }) {
   const [activeRoles, setActiveRolesState] = useState([]);   // array of role objects { id, name, ... }
   const [isViewAsActive, setIsViewAsActive] = useState(false);
   const [rlsData, setRlsData] = useState(null);              // result from /api/rls/apply
@@ -84,11 +85,12 @@ export function RLSProvider({ children, fileId }) {
 
   /** Exit simulation mode and restore full data access. */
   const clearViewAs = useCallback(() => {
+    if (shareLocked) return;
     setActiveRolesState([]);
     setIsViewAsActive(false);
     setRlsData(null);
     setRlsError(null);
-  }, []);
+  }, [shareLocked]);
 
   return (
     <RLSContext.Provider
@@ -99,6 +101,7 @@ export function RLSProvider({ children, fileId }) {
         rlsLoading,
         rlsError,
         effectivePermission,
+        isShareLocked: shareLocked,
         setActiveRoles,
         clearViewAs,
         fileId,

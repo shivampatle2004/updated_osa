@@ -1,6 +1,5 @@
 import io
 import datetime
-import base64
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, letter, landscape as rl_landscape, portrait as rl_portrait
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image as PlatypusImage
@@ -8,67 +7,242 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
 
-def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=3*inch):
+# Brand palette aligned with BI dashboard / report theme
+_CHART_PRIMARY = "#78176b"
+_CHART_PALETTE = ["#78176b", "#9b4d8c", "#b87aa8", "#6d28d9", "#0ea5e9", "#64748b"]
+
+
+def _human_axis_value(val, _pos=None):
+    """Compact axis labels: 1.2B / 560M / 39K — no scientific notation."""
+    try:
+        n = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+    sign = "−" if n < 0 else ""
+    n = abs(n)
+    if n >= 1e12:
+        return f"{sign}{n / 1e12:.1f}T"
+    if n >= 1e9:
+        return f"{sign}{n / 1e9:.1f}B"
+    if n >= 1e6:
+        return f"{sign}{n / 1e6:.1f}M"
+    if n >= 1e3:
+        return f"{sign}{n / 1e3:.1f}K"
+    if n >= 100:
+        return f"{sign}{n:,.0f}"
+    if n >= 1:
+        return f"{sign}{n:,.1f}".rstrip("0").rstrip(".")
+    return f"{sign}{n:.2f}"
+
+
+def _short_label(text, max_len=14):
+    s = str(text).strip().replace("\n", " ")
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
+
+def _is_date_like_label(s):
+    s = str(s).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return True
+    if len(s) >= 10 and s[2] == "/" and s[5] == "/":
+        return True
+    return False
+
+
+def _skip_column_for_kpi_summary(col_name: str) -> bool:
+    """Skip identifier-like columns in Summary — totals/averages are misleading."""
+    n = (col_name or "").strip().lower()
+    if not n:
+        return True
+    if n in ("id", "index", "row", "rownum", "row_number", "uuid", "guid", "key"):
+        return True
+    if n.endswith("_id"):
+        return True
+    return False
+
+
+def _downsample_dict_rows(rows, lk, vk, chart_type, max_points=18):
+    """Reduce overcrowded axes; preserve time order for date-like categories."""
+    if not rows or len(rows) <= max_points:
+        return rows
+    date_like = lk and ("date" in lk.lower() or "time" in lk.lower())
+    if not date_like and rows:
+        date_like = _is_date_like_label(rows[0].get(lk, ""))
+    if date_like and chart_type in ("bar", "line", "area", "step"):
+        step = max(1, len(rows) // max_points)
+        return rows[::step][:max_points]
+    if chart_type in ("bar", "pie"):
+        try:
+            ranked = sorted(
+                rows,
+                key=lambda r: float(r.get(vk, 0) or 0),
+                reverse=True,
+            )
+            return ranked[:max_points]
+        except (TypeError, ValueError):
+            return rows[:max_points]
+    return rows[:max_points]
+
+
+def _apply_bi_chart_style(ax, fig, *, show_y_grid=True):
+    """Clean dashboard look: soft panel, no heavy frame, optional horizontal grid."""
+    ax.set_facecolor("#f8fafc")
+    fig.patch.set_facecolor("#ffffff")
+    for spine_name in ("top", "right"):
+        ax.spines[spine_name].set_visible(False)
+    ax.spines["bottom"].set_color("#e2e8f0")
+    ax.spines["left"].set_color("#e2e8f0")
+    ax.tick_params(axis="both", colors="#64748b", labelsize=9)
+    if show_y_grid:
+        ax.yaxis.grid(True, color="#e2e8f0", linestyle="-", linewidth=0.9, alpha=1)
+        ax.set_axisbelow(True)
+    else:
+        ax.grid(False)
+    ax.xaxis.grid(False)
+
+
+def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=3*inch, x_key=None, y_key=None):
     """
-    Generate a chart image (PNG) from data.
-    Returns base64 encoded PNG image bytes.
+    Generate a PNG chart styled to match the BI report theme (purple, readable axes).
     """
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        import numpy as np
-        
-        fig, ax = plt.subplots(figsize=(width/inch, height/inch))
-        
+        from matplotlib import ticker as mticker
+
+        # Slightly taller figure for rotated category labels
+        fig_h = max(height / inch, 3.2)
+        fig_w = max(width / inch, 7.0)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
+        keys = []
+        x_label, y_label = "Category", "Value"
+
         if not data or len(data) == 0:
-            ax.text(0.5, 0.5, 'No data available', ha='center', va='center')
-            ax.axis('off')
+            ax.text(0.5, 0.5, "No data available", ha="center", va="center", color="#64748b", fontsize=11)
+            ax.axis("off")
         else:
-            # Extract labels and values
-            if isinstance(data, list) and len(data) > 0:
-                if isinstance(data[0], dict):
-                    keys = list(data[0].keys())
-                    labels = [str(row.get(keys[0], ''))[:20] for row in data[:10]]
-                    try:
-                        values = [float(row.get(keys[1], 0)) for row in data[:10]]
-                    except:
-                        values = list(range(len(data)))
+            labels = []
+            values = []
+            chart_type = (chart_type or "bar").lower()
+            if chart_type == "column":
+                chart_type = "bar"
+
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                keys = list(data[0].keys())
+                lk = x_key if x_key and x_key in data[0] else None
+                vk = y_key if y_key and y_key in data[0] else None
+                if not lk or not vk:
+                    if "name" in data[0] and "value" in data[0]:
+                        lk, vk = "name", "value"
+                    else:
+                        lk = lk or (keys[0] if keys else None)
+                        num_k = None
+                        for k in keys:
+                            if k == lk:
+                                continue
+                            try:
+                                float(data[0].get(k))
+                                num_k = k
+                                break
+                            except (TypeError, ValueError):
+                                continue
+                        vk = vk or num_k or (keys[1] if len(keys) > 1 else keys[0])
+                if lk and vk and lk == vk and len(keys) > 1:
+                    for k in keys:
+                        if k != lk:
+                            vk = k
+                            break
+                x_label = str(lk) if lk else x_label
+                y_label = str(vk) if vk else y_label
+
+                slice_rows = _downsample_dict_rows(data, lk, vk, chart_type, max_points=18)
+                try:
+                    values = [float(row.get(vk, 0) or 0) for row in slice_rows]
+                except (TypeError, ValueError):
+                    values = list(range(len(slice_rows)))
+                labels = [_short_label(row.get(lk, ""), 16) for row in slice_rows]
+            elif isinstance(data, list) and len(data) > 0:
+                cap = min(24, len(data))
+                labels = [str(i) for i in range(cap)]
+                values = [float(x) for x in data[:cap]]
+            else:
+                labels, values = [], []
+
+            if chart_type == "pie":
+                _apply_bi_chart_style(ax, fig, show_y_grid=False)
+                ax.pie(
+                    values,
+                    labels=labels,
+                    autopct="%1.1f%%",
+                    colors=_CHART_PALETTE * (1 + len(values) // len(_CHART_PALETTE)),
+                    wedgeprops=dict(edgecolor="white", linewidth=1.2),
+                    textprops={"fontsize": 8, "color": "#334155"},
+                )
+                ax.axis("equal")
+            else:
+                _apply_bi_chart_style(ax, fig)
+                ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_axis_value))
+                if chart_type in ("line", "step"):
+                    x_idx = list(range(len(labels)))
+                    if chart_type == "step":
+                        ax.plot(
+                            x_idx,
+                            values,
+                            color=_CHART_PRIMARY,
+                            linewidth=2.4,
+                            drawstyle="steps-post",
+                        )
+                    else:
+                        ax.plot(
+                            x_idx,
+                            values,
+                            color=_CHART_PRIMARY,
+                            linewidth=2.4,
+                            marker="o",
+                            markersize=5,
+                            markerfacecolor="white",
+                            markeredgewidth=1.5,
+                            markeredgecolor=_CHART_PRIMARY,
+                        )
+                    ax.set_xticks(x_idx)
+                    ax.set_xticklabels(labels, rotation=32, ha="right", fontsize=8)
+                    ax.set_xlabel(x_label, color="#475569", fontsize=10, labelpad=8)
+                    ax.set_ylabel(y_label, color="#475569", fontsize=10, labelpad=8)
                 else:
-                    labels = [str(i) for i in range(len(data))]
-                    values = data
-            else:
-                labels = []
-                values = []
-            
-            # Create chart based on type
-            if chart_type == 'bar':
-                ax.bar(labels, values, color='#78176b', alpha=0.8)
-                ax.set_xlabel(keys[0] if len(keys) > 0 else 'Category')
-                ax.set_ylabel(keys[1] if len(keys) > 1 else 'Value')
-            elif chart_type == 'line':
-                ax.plot(labels, values, marker='o', color='#78176b', linewidth=2)
-                ax.set_xlabel(keys[0] if len(keys) > 0 else 'Category')
-                ax.set_ylabel(keys[1] if len(keys) > 1 else 'Value')
-            elif chart_type == 'pie':
-                ax.pie(values, labels=labels, autopct='%1.1f%%', colors=['#78176b', '#9b59b6', '#3498db', '#2ecc71', '#f1c40f'])
-            else:
-                ax.bar(labels, values, color='#78176b', alpha=0.8)
-            
+                    # Bar (default): numeric x positions — matches dashboard bar visuals
+                    x_idx = list(range(len(labels)))
+                    ax.bar(
+                        x_idx,
+                        values,
+                        color=_CHART_PRIMARY,
+                        edgecolor="white",
+                        linewidth=0.85,
+                        width=0.72,
+                        alpha=0.92,
+                    )
+                    ax.set_xticks(x_idx)
+                    ax.set_xticklabels(labels, rotation=32, ha="right", fontsize=8)
+                    ax.set_xlabel(x_label, color="#475569", fontsize=10, labelpad=8)
+                    ax.set_ylabel(y_label, color="#475569", fontsize=10, labelpad=8)
+
             if title:
-                ax.set_title(title, fontsize=12, fontweight='bold')
-            
-            ax.grid(True, alpha=0.3)
-            plt.xticks(rotation=45, ha='right')
-        
-        plt.tight_layout()
-        
-        # Save to buffer
+                ax.set_title(
+                    title,
+                    fontsize=13,
+                    fontweight="600",
+                    color=_CHART_PRIMARY,
+                    pad=14,
+                )
+
+            fig.subplots_adjust(bottom=0.22, left=0.12, right=0.96, top=0.88)
+
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor=fig.get_facecolor(), pad_inches=0.28)
         plt.close(fig)
         buf.seek(0)
-        
         return buf.getvalue()
     except Exception as e:
         import traceback
@@ -163,41 +337,55 @@ class PaginatedReportEngine:
         
         # Calculate page dimensions
         page_width = page_size[0] - left_margin - right_margin
+        report_row_cap = max(1, min(int(default_rows_per_page or 30), 50_000))
         
         # ===== 1. HEADER SECTION =====
         story.append(Paragraph(header_text, styles['ReportTitle']))
         story.append(Paragraph(datetime.datetime.now().strftime('%B %d, %Y'), styles['ReportDate']))
+        ds_rows = report_config.get("dataset_row_count")
+        sel_cols = report_config.get("selected_columns_count")
+        if ds_rows is not None or sel_cols is not None:
+            bits = []
+            if ds_rows is not None:
+                try:
+                    bits.append(f"<b>Dataset rows:</b> {int(ds_rows):,}")
+                except (TypeError, ValueError):
+                    bits.append(f"<b>Dataset rows:</b> {ds_rows}")
+            if sel_cols is not None:
+                try:
+                    bits.append(f"<b>Columns selected for export:</b> {int(sel_cols)}")
+                except (TypeError, ValueError):
+                    bits.append(f"<b>Columns selected for export:</b> {sel_cols}")
+            story.append(Paragraph(" &nbsp;|&nbsp; ".join(bits), styles['ReportDate']))
         story.append(Spacer(1, 0.2 * inch))
         
         # ===== 2. SUMMARY SECTION (KPIs) =====
         if include_summary:
-            story.append(Paragraph('Summary', styles['SectionHeader']))
-            
-            # Get data for summary
+            # Get data for summary (cap to same limit as charts: rows_per_page from report settings)
             data_source_index = 0
             data_rows = data_provider_fn(data_source_index)
-            
+            if data_rows and len(data_rows) > report_row_cap:
+                data_rows = data_rows[:report_row_cap]
+
             if data_rows and len(data_rows) > 0:
-                # Calculate KPIs
+                story.append(Paragraph('Summary', styles['SectionHeader']))
+
                 total_rows = len(data_rows)
-                
-                # Get numeric columns for summary
+
                 numeric_cols = []
-                if len(data_rows) > 0:
-                    sample = data_rows[0]
-                    for key, val in sample.items():
-                        try:
-                            float(val)
-                            numeric_cols.append(key)
-                        except:
-                            pass
-                
-                # Create KPI table
+                sample = data_rows[0]
+                for key, val in sample.items():
+                    if _skip_column_for_kpi_summary(key):
+                        continue
+                    try:
+                        float(val)
+                        numeric_cols.append(key)
+                    except Exception:
+                        pass
+
                 kpi_data = [['Metric', 'Value']]
-                
-                kpi_data.append(['Total Records', str(total_rows)])
-                
-                # Calculate average for numeric columns (limit to first 3)
+                kpi_data.append(['Rows in sample', str(total_rows)])
+
                 for col in numeric_cols[:3]:
                     try:
                         values = [float(row.get(col, 0)) for row in data_rows if row.get(col) is not None]
@@ -206,11 +394,10 @@ class PaginatedReportEngine:
                             total = sum(values)
                             kpi_data.append([f'{col} - Total', f'{total:,.2f}'])
                             kpi_data.append([f'{col} - Average', f'{avg:,.2f}'])
-                    except:
+                    except Exception:
                         pass
-                
-                # Limit to first 6 rows for KPI summary
-                kpi_table = Table(kpi_data[:7], colWidths=[page_width/2, page_width/2])
+
+                kpi_table = Table(kpi_data[:7], colWidths=[page_width / 2, page_width / 2])
                 kpi_style = TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78176b')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -223,25 +410,24 @@ class PaginatedReportEngine:
                 ])
                 kpi_table.setStyle(kpi_style)
                 story.append(kpi_table)
-            
-            story.append(Spacer(1, 0.3 * inch))
+                story.append(Spacer(1, 0.25 * inch))
         
         # ===== 3. CHART SECTION =====
         if include_chart:
             story.append(Paragraph('Visualization', styles['SectionHeader']))
             
             data_rows = data_provider_fn(0)
+            if data_rows and len(data_rows) > report_row_cap:
+                data_rows = data_rows[:report_row_cap]
             if data_rows and len(data_rows) > 0:
-                chart_bytes = generate_chart_image(data_rows[:20], chart_type, header_text)
+                chart_bytes = generate_chart_image(data_rows, chart_type, header_text)
                 if chart_bytes:
                     img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
                     story.append(img)
             
             story.append(Spacer(1, 0.3 * inch))
         
-        # ===== 4. TABLE SECTION =====
-        story.append(Paragraph('Detailed Data', styles['SectionHeader']))
-        
+        # ===== 4. TABLE / CHART ELEMENTS =====
         for element in elements:
             el_type = element.get("type")
             config = element.get("config_json", {})
@@ -256,22 +442,28 @@ class PaginatedReportEngine:
                 rows_per_page = config.get("rows_per_page", default_rows_per_page)
                 show_header_el = config.get("show_header", True)
 
-                table_data = config.get("table_data")
-                if table_data:
-                    data_rows = table_data
-                elif not columns:
-                    data_rows = data_provider_fn(config.get("data_source_index", 0))
+                table_data_cfg = config.get("table_data")
+                if table_data_cfg:
+                    data_rows = table_data_cfg
+                else:
+                    data_rows = data_provider_fn(config.get("data_source_index", 0)) or []
 
-                if not columns and data_rows and len(data_rows) > 0:
-                    columns = list(data_rows[0].keys())
-                
+                if not data_rows:
+                    continue
+
+                if columns:
+                    col_pick = [col.get("name") for col in columns if col.get("name")]
+                    if col_pick:
+                        data_rows = [{k: row.get(k) for k in col_pick} for row in data_rows]
+                else:
+                    columns = [{"name": c, "header": c} for c in list(data_rows[0].keys())]
+
                 if not columns:
                     continue
 
-                if not data_rows:
-                    story.append(Paragraph("No data available.", styles['Normal']))
-                    continue
-                
+                if len(data_rows) > report_row_cap:
+                    data_rows = data_rows[:report_row_cap]
+
                 # Prepare column names
                 col_names = [col.get("name") for col in columns]
                 col_headers = [col.get("header", col.get("name")) for col in columns]
@@ -284,10 +476,10 @@ class PaginatedReportEngine:
                 else:
                     col_widths = None
                 
-                # Split data into pages
+                # Split data into pages (data_rows already capped to export limit)
                 total_rows = len(data_rows)
-                total_pages = (total_rows + rows_per_page - 1) // rows_per_page
-                
+                total_pages = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
+
                 for page_num in range(total_pages):
                     start_idx = page_num * rows_per_page
                     end_idx = min(start_idx + rows_per_page, total_rows)
@@ -335,12 +527,12 @@ class PaginatedReportEngine:
                     
                     # Page number info for this chunk
                     story.append(Spacer(1, 0.1 * inch))
-                    story.append(Paragraph(
-                        f'<small>Showing {start_idx + 1} - {end_idx} of {total_rows} records</small>',
-                        styles['Normal']
-                    ))
-                    
-                    # Page break
+                    if total_pages > 1:
+                        story.append(Paragraph(
+                            f'<small>Rows {start_idx + 1}–{end_idx} of {total_rows}</small>',
+                            styles['Normal'],
+                        ))
+
                     if page_num < total_pages - 1:
                         story.append(PageBreak())
                 
@@ -348,11 +540,18 @@ class PaginatedReportEngine:
 
             elif el_type == "chart":
                 chart_data = config.get("chart_data")
-                chart_type = config.get("chart_type", "bar")
+                chart_type = (config.get("chart_type") or "bar").lower()
+                if chart_type == "column":
+                    chart_type = "bar"
                 title = config.get("title", "Chart")
+                x_field = config.get("xField") or config.get("x_axis")
+                y_field = config.get("yField") or config.get("y_field") or config.get("y_axis")
                 
                 if chart_data and len(chart_data) > 0:
-                    chart_bytes = generate_chart_image(chart_data, chart_type, title)
+                    chart_bytes = generate_chart_image(
+                        chart_data, chart_type, title,
+                        x_key=x_field, y_key=y_field
+                    )
                     if chart_bytes:
                         img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
                         story.append(img)
