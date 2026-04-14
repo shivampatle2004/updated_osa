@@ -12,7 +12,12 @@ import models, schemas
 from auth_utils import get_password_hash, verify_password
 from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls
 import asyncio
+import sys
 from services.modeling_service import change_detection_poller
+
+# Playwright needs subprocess support; ensure Windows uses Proactor loop policy.
+if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="OneStopAnalytics API")
 

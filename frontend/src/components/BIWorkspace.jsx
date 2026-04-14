@@ -43,9 +43,26 @@ import './BIWorkspace.css';
 
 const DEFAULT_PAGES = [{ id: 'page-1', name: 'Page 1' }];
 const LARGE_DATASET_ROW_THRESHOLD = 20000;
+
+function uniqueVisualId(prefix = 'graph') {
+  const rnd = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now()}-${rnd}`;
+}
+
+function newReportSlotId() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `rep-${crypto.randomUUID()}`;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return `rep-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
 /** After blank report → database: open SQL dialog on the newly created file (not the old report). */
 const OSA_OPEN_SQL_AFTER_NEW_REPORT = 'osa_open_sql_after_new_report';
 const REPORT_HEADER_PLACEHOLDER = 'Enter the report name';
+const OSA_WORKSPACE_UI_PREFIX = 'osa_workspace_ui';
 
 const SQL_MODAL_DEFAULTS = {
   connection_name: '',
@@ -95,6 +112,25 @@ const BIWorkspace = ({
   isGuest = false
 }) => {
   const navigate = useNavigate();
+  const safeFileKey = String(fileId || 'default');
+  const uiStateKey = useCallback((name) => `${OSA_WORKSPACE_UI_PREFIX}:${safeFileKey}:${name}`, [safeFileKey]);
+  const readUiState = useCallback((name, fallback) => {
+    try {
+      const raw = sessionStorage.getItem(uiStateKey(name));
+      return raw == null || raw === '' ? fallback : raw;
+    } catch (_) {
+      return fallback;
+    }
+  }, [uiStateKey]);
+
+  /** Published link with RLS: `shareLock=1` + `simulateRole` — recipient cannot exit View As or open Security tools. */
+  const shareLinkLocked = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const p = new URLSearchParams(window.location.search);
+    const sr = p.get('simulateRole');
+    return p.get('shareLock') === '1' && Boolean(sr?.trim());
+  }, []);
+
   const reportRef = useRef(null);
   const newFileInputRef = useRef(null);
   const excelFileInputRef = useRef(null);
@@ -115,7 +151,14 @@ const BIWorkspace = ({
   const [processingStatus, setProcessingStatus] = useState('idle');
   
   // -- State: UI Layout & Navigation --
-  const [activeView, setActiveView] = useState('report'); // 'report', 'data', 'model', 'connections'
+  const [activeView, setActiveView] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(`${OSA_WORKSPACE_UI_PREFIX}:${String(fileId || 'default')}:activeView`);
+      return raw || 'report';
+    } catch (_) {
+      return 'report';
+    }
+  }); // 'report', 'data', 'model', 'connections'
 
   const readSessionKey = (key) => {
     try {
@@ -126,7 +169,13 @@ const BIWorkspace = ({
   };
   const [remoteConnectionId, setRemoteConnectionId] = useState(() => readSessionKey('osa_remote_connection_id'));
   const [remoteProfileId, setRemoteProfileId] = useState(() => readSessionKey('osa_remote_profile_id'));
-  const [ribbonTab, setRibbonTab] = useState('Home');
+  const [ribbonTab, setRibbonTab] = useState(() => {
+    try {
+      return sessionStorage.getItem(`${OSA_WORKSPACE_UI_PREFIX}:${String(fileId || 'default')}:ribbonTab`) || 'Home';
+    } catch (_) {
+      return 'Home';
+    }
+  });
   const [activeVisualId, setActiveVisualId] = useState(null);
   const [selectedData, setSelectedData] = useState(null);
   const [activeColumn, setActiveColumn] = useState(null);
@@ -154,11 +203,18 @@ const BIWorkspace = ({
   const [defaultBookmarkId, setDefaultBookmarkId] = useState(null);
   const [perfIsRecording, setPerfIsRecording] = useState(false);
   const [perfLogs, setPerfLogs] = useState([]);
-  const [rightPaneTab, setRightPaneTab] = useState('visualizations');
+  const [rightPaneTab, setRightPaneTab] = useState(() => {
+    try {
+      return sessionStorage.getItem(`${OSA_WORKSPACE_UI_PREFIX}:${String(fileId || 'default')}:rightPaneTab`) || 'visualizations';
+    } catch (_) {
+      return 'visualizations';
+    }
+  });
   const [pageViewMode, setPageViewMode] = useState('fit_page');
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [reportTheme, setReportTheme] = useState('theme_default');
   const [reportHeaderText, setReportHeaderText] = useState(REPORT_HEADER_PLACEHOLDER);
+  const [reportBackgroundColor, setReportBackgroundColor] = useState('#ffffff');
   const perfMarkRef = useRef(0);
   const perfLastLogRef = useRef({ key: '', ts: 0 });
   const insightsPanelRef = useRef(null);
@@ -190,6 +246,28 @@ const BIWorkspace = ({
   const [sqlSaveProfile, setSqlSaveProfile] = useState(true);
   const [sqlSavedProfiles, setSqlSavedProfiles] = useState([]);
   const [sqlConnData, setSqlConnData] = useState(() => ({ ...SQL_MODAL_DEFAULTS }));
+  const pushRecentSource = useCallback((entry) => {
+    if (!entry || !entry.actionId) return;
+    try {
+      const raw = localStorage.getItem('osa_recent_sources');
+      const current = raw ? JSON.parse(raw) : [];
+      const arr = Array.isArray(current) ? current : [];
+      const normalized = {
+        actionId: entry.actionId,
+        label: entry.label || entry.actionId,
+        sub: entry.sub || '',
+        payload: entry.payload || null,
+      };
+      const next = [
+        normalized,
+        ...arr.filter((x) => !(x?.actionId === normalized.actionId && x?.label === normalized.label)),
+      ].slice(0, 12);
+      localStorage.setItem('osa_recent_sources', JSON.stringify(next));
+      window.dispatchEvent(new Event('osa_recent_sources_updated'));
+    } catch (_) {
+      /* ignore */
+    }
+  }, []);
 
   const [showSqlImportModal, setShowSqlImportModal] = useState(false);
   const [showSqlDatasetModal, setShowSqlDatasetModal] = useState(false);
@@ -206,7 +284,6 @@ const BIWorkspace = ({
   const [showDataVaultPanel, setShowDataVaultPanel] = useState(false);
   const [showMarkDateTableModal, setShowMarkDateTableModal] = useState(false);
   const [showChangeDetectionModal, setShowChangeDetectionModal] = useState(false);
-
   // ── RLS state ──────────────────────────────────────────────────────────────
   const [showManageRoles, setShowManageRoles] = useState(false);
   const [showViewAs, setShowViewAs] = useState(false);
@@ -238,9 +315,11 @@ const BIWorkspace = ({
 
   const handleAddToReport = useCallback((graph) => {
     if (!graph) return;
-    
+
+    const graphId = graph.id != null && String(graph.id).trim() !== '' ? graph.id : null;
     const element = {
-      id: graph.id,
+      id: newReportSlotId(),
+      graphId,
       type: graph.graph_type,
       title: graph.options?.title || graph.graph_type,
       x_axis: graph.x_axis,
@@ -248,14 +327,9 @@ const BIWorkspace = ({
       config: graph.options || {},
       cached_data: graph.cached_data
     };
-    
-    setReportElements(prev => {
-      if (prev.some(e => e.id === element.id)) {
-        return prev;
-      }
-      return [...prev, element];
-    });
-    
+
+    setReportElements((prev) => [...prev, element]);
+
     alert(`"${element.title}" added to report. Open Insert > Paginated Report to generate PDF.`);
   }, []);
 
@@ -449,6 +523,10 @@ const BIWorkspace = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishLink, setPublishLink] = useState('');
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishModalStep, setPublishModalStep] = useState('configure');
+  const [publishShareMode, setPublishShareMode] = useState('full');
+  const [publishSelectedRoleIds, setPublishSelectedRoleIds] = useState([]);
+  const [publishRolesList, setPublishRolesList] = useState([]);
   const [modelTables, setModelTables] = useState([]);
 
   const [modelRelationships, setModelRelationships] = useState([]);
@@ -458,6 +536,21 @@ const BIWorkspace = ({
   const [dateHierarchy, setDateHierarchy] = useState(null);
   const [dateFilter, setDateFilter] = useState({ year: null, month: null, quarter: null });
   const [isRefreshingCharts, setIsRefreshingCharts] = useState(false);
+
+  useEffect(() => {
+    if (!showPublishModal || !fileId || publishModalStep !== 'configure') return;
+    let cancelled = false;
+    import('../services/rlsService').then(({ getRoles }) => {
+      getRoles(fileId)
+        .then((roles) => {
+          if (!cancelled) setPublishRolesList(Array.isArray(roles) ? roles : []);
+        })
+        .catch(() => {
+          if (!cancelled) setPublishRolesList([]);
+        });
+    });
+    return () => { cancelled = true; };
+  }, [showPublishModal, fileId, publishModalStep]);
 
   // Global Change Detection Polling
   useEffect(() => {
@@ -797,6 +890,31 @@ const BIWorkspace = ({
     if (graphs.length > 0) graphsEverNonEmptyRef.current = true;
   }, [graphs]);
 
+  useEffect(() => {
+    if (!fileId) return;
+    const validViews = new Set(['report', 'model', 'connections', 'catalog', 'data']);
+    const savedView = readUiState('activeView', 'report');
+    const savedRibbonTab = readUiState('ribbonTab', 'Home');
+    const savedRightPaneTab = readUiState('rightPaneTab', 'visualizations');
+    const savedPageId = readUiState('activePageId', 'page-1');
+    setActiveView(validViews.has(savedView) ? savedView : 'report');
+    setRibbonTab(savedRibbonTab || 'Home');
+    setRightPaneTab(savedRightPaneTab || 'visualizations');
+    if (savedPageId) setActivePageId(savedPageId);
+  }, [fileId, readUiState]);
+
+  useEffect(() => {
+    if (!fileId) return;
+    try {
+      sessionStorage.setItem(uiStateKey('activeView'), String(activeView || 'report'));
+      sessionStorage.setItem(uiStateKey('ribbonTab'), String(ribbonTab || 'Home'));
+      sessionStorage.setItem(uiStateKey('rightPaneTab'), String(rightPaneTab || 'visualizations'));
+      sessionStorage.setItem(uiStateKey('activePageId'), String(activePageId || 'page-1'));
+    } catch (_) {
+      /* ignore */
+    }
+  }, [fileId, activeView, ribbonTab, rightPaneTab, activePageId, uiStateKey]);
+
   // Poll processing status so charts/data appear quickly once background task finishes.
   // Also handles the case where fileDetails hasn't loaded yet (fresh upload navigation).
   useEffect(() => {
@@ -1047,6 +1165,11 @@ const BIWorkspace = ({
               ? modelData.reportHeaderText
               : REPORT_HEADER_PLACEHOLDER
           );
+          setReportBackgroundColor(
+            typeof modelData.reportBackgroundColor === 'string' && modelData.reportBackgroundColor.trim()
+              ? modelData.reportBackgroundColor
+              : '#ffffff'
+          );
         }
 
         prefetchVisibleGraphData(normalizedGraphs, detectedRowCount);
@@ -1084,6 +1207,11 @@ const BIWorkspace = ({
             typeof modelData.reportHeaderText === 'string' && modelData.reportHeaderText.trim()
               ? modelData.reportHeaderText
               : REPORT_HEADER_PLACEHOLDER
+          );
+          setReportBackgroundColor(
+            typeof modelData.reportBackgroundColor === 'string' && modelData.reportBackgroundColor.trim()
+              ? modelData.reportBackgroundColor
+              : '#ffffff'
           );
           if (modelData.sql_dataset) {
             setSqlDatasetConfig(modelData.sql_dataset);
@@ -1321,6 +1449,22 @@ const BIWorkspace = ({
         : g
     )));
   };
+
+  // Keep paginated-report payloads in sync when graph data finishes loading after "Add to report".
+  useEffect(() => {
+    setReportElements((prev) => {
+      let changed = false;
+      const next = prev.map((re) => {
+        const gid = re.graphId != null ? re.graphId : re.id;
+        const g = graphs.find((x) => x.id === gid);
+        if (!g?.cached_data) return re;
+        if (re.cached_data === g.cached_data) return re;
+        changed = true;
+        return { ...re, cached_data: g.cached_data };
+      });
+      return changed ? next : prev;
+    });
+  }, [graphs]);
 
   // If the backend schema is empty/missing, fall back to dataset preview inference.
   useEffect(() => {
@@ -1640,6 +1784,13 @@ const BIWorkspace = ({
         }
         break;
       }
+      case 'open_recent_source': {
+        const src = args[0];
+        if (src?.actionId) {
+          await handleRibbonAction(src.actionId, ...(src?.payload ? [src.payload] : []));
+        }
+        break;
+      }
       case 'file_new':
         setActiveView('report');
         setIsNewReportDraft(true);
@@ -1649,15 +1800,24 @@ const BIWorkspace = ({
         // If the File backstage view is open, close it first to avoid overlap.
         setRibbonTab('Home');
         setShowAddFileModal(true);
+        pushRecentSource({ actionId: 'get_data', label: 'Get data', sub: 'Open data source picker' });
         break;
       case 'import':
         setShowAddFileModal(true);
+        pushRecentSource({ actionId: 'import', label: 'Import', sub: 'Import file/data source' });
         break;
       case 'open_local':
         if (newFileInputRef.current) newFileInputRef.current.click();
+        pushRecentSource({ actionId: 'open_local', label: 'This device', sub: 'Open from local computer' });
+        break;
+      case 'open_cloud':
+        setRibbonTab('Home');
+        setShowConnectorsModal(true);
+        pushRecentSource({ actionId: 'open_cloud', label: 'Cloud storage', sub: 'Open cloud connectors' });
         break;
       case 'excel':
         if (excelFileInputRef.current) excelFileInputRef.current.click();
+        pushRecentSource({ actionId: 'excel', label: 'Excel workbook', sub: 'Import .xlsx files' });
         break;
       case 'cut': {
         if (!activeVisualId) break;
@@ -1703,9 +1863,11 @@ const BIWorkspace = ({
       case 'sql_import':
         setActiveView('model');
         setShowSqlImportModal(true);
+        pushRecentSource({ actionId: 'sql_import', label: 'Import from connection', sub: 'Add tables from existing DBs' });
         break;
       case 'more_connectors':
         setShowConnectorsModal(true);
+        pushRecentSource({ actionId: 'more_connectors', label: 'More connectors', sub: 'Open connector catalog' });
         break;
       case 'data_vault':
         setShowDataVaultPanel(true);
@@ -2054,12 +2216,13 @@ const BIWorkspace = ({
         break;
       case 'enter_data':
         setShowEnterDataModal(true);
+        pushRecentSource({ actionId: 'enter_data', label: 'Enter data', sub: 'Manual table entry' });
         break;
       case 'publish':
         handlePublish();
         break;
       case 'add_sparkline': {
-        const newId = `graph-${Date.now()}`;
+        const newId = uniqueVisualId('graph');
         const newVisual = {
           id: newId,
           graph_type: 'sparkline',
@@ -2137,6 +2300,34 @@ const BIWorkspace = ({
         setReportHeaderText(trimmedHeader || REPORT_HEADER_PLACEHOLDER);
         break;
       }
+      case 'set_report_background': {
+        const current = String(reportBackgroundColor || '#ffffff');
+        const nextColor = prompt('Enter report background color (hex):', current);
+        if (nextColor === null) break;
+        const trimmed = nextColor.trim();
+        const hexColor = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+        if (!hexColor.test(trimmed)) {
+          alert('Please enter a valid hex color like #744EC2.');
+          break;
+        }
+        setReportBackgroundColor(trimmed);
+        break;
+      }
+      case 'set_report_bg_white':
+        setReportBackgroundColor('#ffffff');
+        break;
+      case 'set_report_bg_soft_gray':
+        setReportBackgroundColor('#f8fafc');
+        break;
+      case 'set_report_bg_soft_blue':
+        setReportBackgroundColor('#f3f8ff');
+        break;
+      case 'set_report_bg_soft_purple':
+        setReportBackgroundColor('#f5f0ff');
+        break;
+      case 'set_report_bg_soft_cream':
+        setReportBackgroundColor('#fff9eb');
+        break;
 
       default:
         console.log("Ribbon Action:", actionId, args);
@@ -2144,7 +2335,7 @@ const BIWorkspace = ({
   };
 
   const handleAddVisual = (type, dropPosition = null) => {
-    const newId = `graph-${Date.now()}`;
+    const newId = uniqueVisualId('graph');
     const defaultX = schema[0]?.column_name || '';
     const defaultY = schema.find(s => isNumericType(s?.data_type))?.column_name || '';
     const defaultWidth = 520;
@@ -2188,7 +2379,7 @@ const BIWorkspace = ({
   };
 
   const addCustomVisual = (graphType, options = {}) => {
-    const newId = `graph-${Date.now()}`;
+    const newId = uniqueVisualId('graph');
     const newVisual = {
       id: newId,
       graph_type: graphType,
@@ -2566,7 +2757,8 @@ const BIWorkspace = ({
           relationships: Array.isArray(existingModel?.relationships) ? existingModel.relationships : [],
           pages,
           activePageId,
-          reportHeaderText
+          reportHeaderText,
+          reportBackgroundColor
         };
         await fetch(`/api/files/${fileId}/model`, {
           method: 'PUT',
@@ -2586,7 +2778,7 @@ const BIWorkspace = ({
       console.error("Save failed:", err);
       return false;
     }
-  }, [fileId, graphs, pages, activePageId, fileName, fileDetails?.status, reportHeaderText]);
+  }, [fileId, graphs, pages, activePageId, fileName, fileDetails?.status, reportHeaderText, reportBackgroundColor]);
 
   /** Auto-save report canvas and page tabs so switching views or tabs does not lose work. */
   useEffect(() => {
@@ -2668,6 +2860,11 @@ const BIWorkspace = ({
         if (data.profile_id) setRemoteProfileId(data.profile_id);
       }
       setSqlSuccess(`Connected to "${sqlConnData.connection_name || sqlConnData.database}" successfully. You can now add DB tables in Model view.`);
+      pushRecentSource({
+        actionId: 'sql_import',
+        label: sqlConnData.connection_name || sqlConnData.database || 'SQL connection',
+        sub: `${sqlConnData.db_type || 'db'} · ${sqlConnData.host || 'host'}:${sqlConnData.port || ''}`,
+      });
       setTimeout(() => {
         setShowSqlModal(false);
         setSqlSuccess('');
@@ -2836,23 +3033,55 @@ const BIWorkspace = ({
       alert('Please upload or open a report before publishing.');
       return;
     }
-
-    setIsPublishing(true);
+    setPublishLink('');
+    setPublishModalStep('configure');
+    setPublishShareMode('full');
+    setPublishSelectedRoleIds([]);
+    setPublishRolesList([]);
+    setIsPublishing(false);
     setShowPublishModal(true);
-    // Simulate publishing delay
-    setTimeout(() => {
+  };
+
+  const togglePublishRoleId = useCallback((roleId) => {
+    setPublishSelectedRoleIds((prev) =>
+      prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
+    );
+  }, []);
+
+  const closePublishModal = useCallback(() => {
+    setShowPublishModal(false);
+    setPublishModalStep('configure');
+    setIsPublishing(false);
+    setPublishLink('');
+  }, []);
+
+  const handleConfirmPublish = useCallback(() => {
+    if (!fileId) return;
+    if (publishShareMode === 'rls') {
+      if (!publishSelectedRoleIds.length) {
+        alert('Select one or more security roles for this link, or choose Full report access.');
+        return;
+      }
+      if (!publishRolesList.length) {
+        alert('No roles exist yet for this dataset. Define them under Modeling → Security → Manage roles, or publish with full access.');
+        return;
+      }
+    }
+    setPublishModalStep('working');
+    setIsPublishing(true);
+    window.setTimeout(() => {
       const params = new URLSearchParams();
       params.set('fileId', String(fileId));
       if (fileName) params.set('fileName', fileName);
-      if (simulationData.isViewAsActive && simulationData.activeRoles.length > 0) {
-        params.set('simulateRole', simulationData.activeRoles.map(r => r.id).join(','));
+      if (publishShareMode === 'rls' && publishSelectedRoleIds.length > 0) {
+        params.set('simulateRole', publishSelectedRoleIds.join(','));
+        params.set('shareLock', '1');
       }
-      const liveLink = `${window.location.origin}/?${params.toString()}`;
-
+      setPublishLink(`${window.location.origin}/?${params.toString()}`);
       setIsPublishing(false);
-      setPublishLink(liveLink);
-    }, 3000);
-  };
+      setPublishModalStep('done');
+    }, 1600);
+  }, [fileId, fileName, publishShareMode, publishSelectedRoleIds, publishRolesList.length]);
 
   const handleEnterDataSubmit = async (file) => {
     setIsInitialLoading(true);
@@ -2983,7 +3212,7 @@ const BIWorkspace = ({
             }
           }}
         >
-          <div className="sql-modal">
+          <div className="sql-modal sql-modal--split">
             <div className="sql-modal-header">
               <h3 className="sql-modal-title">SQL Server database</h3>
               <button
@@ -2996,40 +3225,45 @@ const BIWorkspace = ({
             </div>
 
             <form className="sql-modal-body" onSubmit={handleSqlConnect}>
+              <div className="sql-modal-split">
+                {userId && sqlSavedProfiles.length > 0 && (
+                  <aside className="sql-sidebar" aria-label="Recent connections">
+                    <div className="sql-recent-block">
+                      <div className="sql-label">Recent connections</div>
+                      <ul className="sql-recent-list">
+                        {sqlSavedProfiles.map((p) => (
+                          <li key={p.id} className="sql-recent-item">
+                            <div className="sql-recent-meta">
+                              <span className="sql-recent-name">{p.connection_name}</span>
+                              <span className="sql-recent-sub">
+                                {p.host} · {p.database} · {p.db_type}
+                                {p.ssl ? ' · SSL' : ''}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="sql-btn sql-btn-secondary sql-recent-connect"
+                              disabled={isSqlConnecting}
+                              onClick={() => handleQuickConnectSaved(p.id)}
+                            >
+                              Connect
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </aside>
+                )}
+
+                <div className="sql-main-fields">
               {sqlError && <div className="sql-error-banner">{sqlError}</div>}
               {sqlSuccess && <div className="sql-success-banner">{sqlSuccess}</div>}
 
-              {userId && sqlSavedProfiles.length > 0 && (
-                <div className="sql-recent-block">
-                  <div className="sql-label">Recent connections</div>
-                  <ul className="sql-recent-list">
-                    {sqlSavedProfiles.map((p) => (
-                      <li key={p.id} className="sql-recent-item">
-                        <div className="sql-recent-meta">
-                          <span className="sql-recent-name">{p.connection_name}</span>
-                          <span className="sql-recent-sub">
-                            {p.host} · {p.database} · {p.db_type}
-                            {p.ssl ? ' · SSL' : ''}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="sql-btn sql-btn-secondary sql-recent-connect"
-                          disabled={isSqlConnecting}
-                          onClick={() => handleQuickConnectSaved(p.id)}
-                        >
-                          Connect
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="sql-form-group">
+              <div className="sql-form-group sql-field-connection-name">
                 <label className="sql-label">Connection Name</label>
                 <input
-                  className="sql-input"
+                  className="sql-input sql-input-connection-name"
+                  data-sql-field="connection_name"
                   name="connection_name"
                   placeholder="e.g. Sales Postgres"
                   value={sqlConnData.connection_name}
@@ -3039,10 +3273,11 @@ const BIWorkspace = ({
               </div>
 
               <div className="sql-form-row">
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-db-type">
                   <label className="sql-label">Database Type</label>
                   <select
-                    className="sql-select"
+                    className="sql-select sql-select-db-type"
+                    data-sql-field="db_type"
                     name="db_type"
                     value={sqlConnData.db_type}
                     onChange={handleSqlInputChange}
@@ -3052,10 +3287,11 @@ const BIWorkspace = ({
                     <option value="mssql">SQL Server (MSSQL)</option>
                   </select>
                 </div>
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-port">
                   <label className="sql-label">Port</label>
                   <input
-                    className="sql-input"
+                    className="sql-input sql-input-port"
+                    data-sql-field="port"
                     name="port"
                     type="number"
                     value={sqlConnData.port}
@@ -3066,10 +3302,11 @@ const BIWorkspace = ({
               </div>
 
               <div className="sql-form-row">
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-server">
                   <label className="sql-label">Server</label>
                   <input
-                    className="sql-input"
+                    className="sql-input sql-input-server"
+                    data-sql-field="host"
                     name="host"
                     placeholder={"Friend's IP or Domain (e.g. 192.168.1.1)"}
                     value={sqlConnData.host}
@@ -3077,10 +3314,11 @@ const BIWorkspace = ({
                     required
                   />
                 </div>
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-database">
                   <label className="sql-label">Database</label>
                   <input
-                    className="sql-input"
+                    className="sql-input sql-input-database"
+                    data-sql-field="database"
                     name="database"
                     placeholder={'database_name'}
                     value={sqlConnData.database}
@@ -3092,10 +3330,11 @@ const BIWorkspace = ({
 
               {sqlConnData.db_type !== 'sqlite' && (
                 <div className="sql-form-row">
-                  <div className="sql-form-group">
+                  <div className="sql-form-group sql-field-username">
                     <label className="sql-label">Username</label>
                     <input
-                      className="sql-input"
+                      className="sql-input sql-input-username"
+                      data-sql-field="username"
                       name="username"
                       placeholder="postgres"
                       value={sqlConnData.username}
@@ -3103,10 +3342,11 @@ const BIWorkspace = ({
                       required
                     />
                   </div>
-                  <div className="sql-form-group">
+                  <div className="sql-form-group sql-field-password">
                     <label className="sql-label">Password</label>
                     <input
-                      className="sql-input"
+                      className="sql-input sql-input-password"
+                      data-sql-field="password"
                       name="password"
                       type="password"
                       value={sqlConnData.password}
@@ -3129,7 +3369,7 @@ const BIWorkspace = ({
               </div>
 
               <div className="sql-form-row">
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-ssl-toggle">
                   <label className="sql-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <input
                       name="ssl"
@@ -3140,10 +3380,11 @@ const BIWorkspace = ({
                     Use SSL/TLS
                   </label>
                 </div>
-                <div className="sql-form-group">
+                <div className="sql-form-group sql-field-ssl-mode">
                   <label className="sql-label">SSL Mode</label>
                   <select
-                    className="sql-select"
+                    className="sql-select sql-select-ssl-mode"
+                    data-sql-field="ssl_mode"
                     name="ssl_mode"
                     value={sqlConnData.ssl_mode || 'require'}
                     onChange={handleSqlInputChange}
@@ -3165,6 +3406,8 @@ const BIWorkspace = ({
                 <button type="submit" className="sql-btn sql-btn-primary" disabled={isSqlConnecting}>
                   {isSqlConnecting ? 'Connecting...' : 'Connect'}
                 </button>
+              </div>
+                </div>
               </div>
             </form>
           </div>
@@ -3286,6 +3529,7 @@ const BIWorkspace = ({
         dateHierarchy={dateHierarchy}
         dateFilter={dateFilter}
         setDateFilter={setDateFilter}
+        hideSecurityTools={shareLinkLocked}
       />
       )}
 
@@ -3596,6 +3840,7 @@ const BIWorkspace = ({
                         isViewOnly={isViewOnly}
                         reportTheme={reportTheme}
                         reportHeaderText={reportHeaderText}
+                        reportBackgroundColor={reportBackgroundColor}
                         onUpdateReportHeader={(nextHeader) => {
                           const trimmed = (nextHeader || '').trim();
                           setReportHeaderText(trimmed || REPORT_HEADER_PLACEHOLDER);
@@ -3913,20 +4158,136 @@ const BIWorkspace = ({
 
       <ModalPortal
         isVisible={showPublishModal}
-        onClose={() => setShowPublishModal(false)}
+        onClose={closePublishModal}
         title="Publish Report"
       >
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          {isPublishing ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
+        <div style={{ padding: '8px 0 4px', maxWidth: 520, margin: '0 auto' }}>
+          {publishModalStep === 'working' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', padding: '24px 0' }}>
               <div className="bi-loading-spinner" />
-              <p>Publishing your report to OneStopAnalytics Cloud...</p>
+              <p style={{ margin: 0, color: '#475569', fontSize: 14 }}>Creating your share link…</p>
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-              <div style={{ color: '#00cc66', fontSize: '48px' }}>✓</div>
-              <h3>Success!</h3>
-              <p>Your report is live. Anyone with the link can view it.</p>
+          )}
+
+          {publishModalStep === 'configure' && (
+            <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
+                Choose how people access this report when they open the published link. Row-level security comes from{' '}
+                <strong>Modeling → Security → Manage roles</strong> (view vs edit permissions per role).
+              </p>
+
+              <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: '10px 12px', border: publishShareMode === 'full' ? '2px solid #3b82f6' : '1px solid #e5e7eb', borderRadius: 8, background: publishShareMode === 'full' ? '#eff6ff' : '#fff' }}>
+                <input
+                  type="radio"
+                  name="publish-share-mode"
+                  checked={publishShareMode === 'full'}
+                  onChange={() => { setPublishShareMode('full'); setPublishSelectedRoleIds([]); }}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong style={{ color: '#0f172a' }}>Full report access</strong>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                    Link opens the report without forcing a security role. Recipients see data like a normal author session (not for external RLS enforcement).
+                  </div>
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: '10px 12px', border: publishShareMode === 'rls' ? '2px solid #7c3aed' : '1px solid #e5e7eb', borderRadius: 8, background: publishShareMode === 'rls' ? '#f5f3ff' : '#fff' }}>
+                <input
+                  type="radio"
+                  name="publish-share-mode"
+                  checked={publishShareMode === 'rls'}
+                  onChange={() => setPublishShareMode('rls')}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong style={{ color: '#0f172a' }}>Restricted — apply security roles (recommended)</strong>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                    The link applies the roles you select. Data is filtered using each selected role&apos;s filter rules. <strong>Can View</strong> opens a read-only report; <strong>Can Edit</strong> / <strong>Can View and Edit</strong> allow layout changes. Recipients cannot turn off this mode on the link.
+                  </div>
+                </span>
+              </label>
+
+              {publishShareMode === 'rls' && (
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px', background: '#fafafa' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Roles included in this link</span>
+                    {simulationData.isViewAsActive && simulationData.activeRoles.length > 0 && (
+                      <button
+                        type="button"
+                        className="bi-btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 11 }}
+                        onClick={() => setPublishSelectedRoleIds(simulationData.activeRoles.map((r) => r.id))}
+                      >
+                        Use current View as
+                      </button>
+                    )}
+                  </div>
+                  {!publishRolesList.length ? (
+                    <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>No roles loaded. Add roles under Manage roles first.</p>
+                  ) : (
+                    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {publishRolesList.map((role) => {
+                        const permLabel = role.permission === 'view_edit' ? 'Can View & Edit' : role.permission === 'edit' ? 'Can Edit' : 'Can View';
+                        const checked = publishSelectedRoleIds.includes(role.id);
+                        return (
+                          <li key={role.id}>
+                            <label style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', fontSize: 13 }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => togglePublishRoleId(role.id)}
+                              />
+                              <span style={{ fontWeight: 600, color: '#0f172a' }}>{role.name}</span>
+                              <span style={{ fontSize: 12, color: '#64748b' }}>{permLabel}</span>
+                              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
+                                {(role.rules || []).length} rule{(role.rules || []).length !== 1 ? 's' : ''}
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {publishShareMode === 'rls' && publishSelectedRoleIds.length > 0 && (() => {
+                    const hierarchy = ['view_edit', 'edit', 'view'];
+                    const selected = publishRolesList.filter((r) => publishSelectedRoleIds.includes(r.id));
+                    let bestIdx = 2;
+                    selected.forEach((role) => {
+                      const idx = hierarchy.indexOf(role.permission || 'view');
+                      if (idx >= 0 && idx < bestIdx) bestIdx = idx;
+                    });
+                    const eff = hierarchy[bestIdx];
+                    const expl = eff === 'view'
+                      ? 'Recipients get the most restrictive outcome: read-only report (view-only ribbon hidden).'
+                      : eff === 'edit'
+                        ? 'Recipients can edit visuals; data stays filtered by the selected role(s).'
+                        : 'Recipients can view and edit; data stays filtered by the selected role(s).';
+                    return (
+                      <p style={{ margin: '12px 0 0', fontSize: 12, color: '#475569', lineHeight: 1.45 }}>
+                        <strong>Effective link permission:</strong> {eff === 'view' ? 'View only' : eff === 'edit' ? 'Can edit' : 'Can view & edit'}. {expl} Multiple roles union visible rows.
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button type="button" className="bi-btn-secondary" onClick={closePublishModal}>Cancel</button>
+                <button type="button" className="bi-btn-primary" onClick={handleConfirmPublish}>Create link</button>
+              </div>
+            </div>
+          )}
+
+          {publishModalStep === 'done' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', padding: '8px 0' }}>
+              <div style={{ color: '#00cc66', fontSize: '48px', lineHeight: 1 }}>{'\u2713'}</div>
+              <h3 style={{ margin: 0 }}>Link ready</h3>
+              <p style={{ margin: 0, fontSize: 13, color: '#475569', textAlign: 'center', maxWidth: 440, lineHeight: 1.5 }}>
+                {publishShareMode === 'rls'
+                  ? 'This URL applies the selected security roles. Opening it filters data and sets view or edit access from those roles.'
+                  : 'Anyone with this link can open the report with normal full access (no forced security role).'}
+              </p>
               <div style={{ display: 'flex', width: '100%', gap: '10px', alignItems: 'center', background: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
                 <input readOnly value={publishLink} style={{ flex: 1, border: 'none', background: 'transparent', fontSize: '11px' }} />
                 <button className="bi-btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={() => { navigator.clipboard.writeText(publishLink); alert('Link copied!'); }}>Copy</button>
@@ -3939,10 +4300,11 @@ const BIWorkspace = ({
                   Open
                 </button>
               </div>
-              <button className="bi-btn-primary" onClick={() => setShowPublishModal(false)}>Close</button>
+              <button type="button" className="bi-btn-primary" onClick={closePublishModal}>Close</button>
             </div>
           )}
         </div>
+
       </ModalPortal>
 
       <BISqlDatasetModal
@@ -3987,11 +4349,11 @@ const BIWorkspace = ({
         isOpen={showPaginatedReportModal}
         onClose={() => setShowPaginatedReportModal(false)}
         fileId={fileId}
-        userId={userId}
         dataset={dataset}
         fileName={fileName}
         reportElements={reportElements}
         onReportElementsChange={setReportElements}
+        userId={userId}
       />
       <MarkDateTableModal
         isOpen={showMarkDateTableModal}
@@ -4041,6 +4403,7 @@ const BIWorkspace = ({
         onClose={() => setShowViewAs(false)}
         onOpenManageRoles={() => { setShowViewAs(false); setShowManageRoles(true); }}
         onSimulationChange={setSimulationData}
+        shareLinkLocked={shareLinkLocked}
       />
 
       <DataVaultPanel
@@ -4132,9 +4495,9 @@ const ModalPortal = ({ isVisible, onClose, title, children }) => {
 // Always mounted (not conditional) so the banner stays visible after closing
 // the picker. Wraps its own RLSProvider.
 
-function ViewAsModalWithBanner({ fileId, showModal, onClose, onOpenManageRoles, onSimulationChange }) {
+function ViewAsModalWithBanner({ fileId, showModal, onClose, onOpenManageRoles, onSimulationChange, shareLinkLocked = false }) {
   return (
-    <RLSProvider fileId={fileId}>
+    <RLSProvider fileId={fileId} shareLocked={shareLinkLocked}>
       <ViewAsModalInner
         fileId={fileId}
         showModal={showModal}
@@ -4148,7 +4511,7 @@ function ViewAsModalWithBanner({ fileId, showModal, onClose, onOpenManageRoles, 
 
 // Inner component can safely call useRLS() because it lives inside RLSProvider
 function ViewAsModalInner({ fileId, showModal, onClose, onOpenManageRoles, onSimulationChange }) {
-  const { activeRoles, isViewAsActive, rlsData, clearViewAs, effectivePermission, setActiveRoles } = useRLS();
+  const { activeRoles, isViewAsActive, rlsData, clearViewAs, effectivePermission, setActiveRoles, isShareLocked } = useRLS();
 
   useEffect(() => {
     if (onSimulationChange) {
@@ -4156,28 +4519,27 @@ function ViewAsModalInner({ fileId, showModal, onClose, onOpenManageRoles, onSim
     }
   }, [isViewAsActive, activeRoles, effectivePermission, onSimulationChange]);
 
-  // Read `simulateRole` from URL on load
+  // Read `simulateRole` from URL on load (shared publish links include this)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const simulateRoleIds = urlParams.get('simulateRole');
-    if (simulateRoleIds && fileId && !isViewAsActive) {
-       import('../services/rlsService').then(({ getRoles }) => {
-          getRoles(fileId).then(roles => {
-             const active = roles.filter(r => simulateRoleIds.split(',').includes(String(r.id)));
-             if (active.length > 0) setActiveRoles(active);
-          }).catch(() => {});
-       });
-    }
-  }, [fileId]); // Run once when fileId is loaded
+    if (!simulateRoleIds?.trim() || !fileId || isViewAsActive) return;
+    import('../services/rlsService').then(({ getRoles }) => {
+      getRoles(fileId).then((roles) => {
+        const active = roles.filter((r) => simulateRoleIds.split(',').includes(String(r.id)));
+        if (active.length > 0) setActiveRoles(active);
+      }).catch(() => {});
+    });
+  }, [fileId, isViewAsActive, setActiveRoles]);
 
   return (
     <>
-      {/* Orange banner shown across the top when a role simulation is active */}
       {isViewAsActive && (
         <RLSActiveBanner
           activeRoles={activeRoles}
           rlsData={rlsData}
           onExit={clearViewAs}
+          allowExit={!isShareLocked}
         />
       )}
 

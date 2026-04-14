@@ -22,6 +22,7 @@ const BIDashboardCanvas = ({
     lockObjects = false,
     reportTheme = 'theme_default',
     reportHeaderText = '',
+    reportBackgroundColor = '#ffffff',
     onUpdateReportHeader,
     isViewOnly = false,
 }) => {
@@ -446,7 +447,7 @@ const BIDashboardCanvas = ({
             <div
                 className="bi-visuals-grid"
                 ref={workspaceRef}
-                style={{ minWidth: `${canvasMinWidth}px` }}
+                style={{ minWidth: `${canvasMinWidth}px`, backgroundColor: reportBackgroundColor || '#ffffff' }}
                 onDragOver={handleCanvasDragOver}
                 onDrop={handleCanvasDrop}
                 onMouseDown={(e) => {

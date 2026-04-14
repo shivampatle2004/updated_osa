@@ -1146,6 +1146,113 @@
     max-width: 100%;
 }
 
+/* Add Database Table — wide dialog + saved connections sidebar */
+.bi-model-modal--sql-import {
+    width: min(1320px, calc(100vw - 24px));
+    max-width: min(1320px, calc(100vw - 24px));
+    max-height: min(92vh, 900px);
+}
+
+.bi-model-sql-import-body {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.bi-model-sql-import-split {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    flex: 1;
+    min-height: min(420px, 55vh);
+    max-height: none;
+}
+
+.bi-model-sql-sidebar {
+    width: min(300px, 32vw);
+    min-width: 220px;
+    flex-shrink: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 16px 14px 20px;
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    border-right: 1px solid #e2e8f0;
+}
+
+.bi-model-sql-sidebar .bi-model-saved-block {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.bi-model-sql-sidebar .bi-model-saved-title {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 12px;
+}
+
+.bi-model-sql-sidebar .bi-model-saved-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.bi-model-sql-sidebar .bi-model-saved-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.bi-model-sql-main {
+    flex: 1;
+    min-width: 0;
+    padding: 20px 22px 22px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.bi-model-sql-main .bi-model-sql-import-form {
+    max-width: 100%;
+    width: 100%;
+}
+
+.bi-model-sql-main .bi-model-field:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+    .bi-model-modal--sql-import {
+        width: calc(100vw - 24px);
+        max-height: 92vh;
+    }
+
+    .bi-model-sql-import-split {
+        flex-direction: column;
+        max-height: none;
+    }
+
+    .bi-model-sql-sidebar {
+        width: 100%;
+        min-width: 0;
+        max-height: 36vh;
+        border-right: none;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .bi-model-sql-main {
+        padding: 16px 18px 20px;
+    }
+
+    .bi-model-sql-main .bi-model-sql-import-form {
+        max-width: none;
+    }
+}
+
 /* Table card context menu + inline data preview (Model view) */
 .bi-model-table-ctx-menu {
     position: fixed;
@@ -1160,7 +1267,7 @@
 
 .bi-model-table-ctx-item {
     display: block;
-    width: 100%;
+    width: 83%;
     text-align: left;
     border: none;
     background: transparent;

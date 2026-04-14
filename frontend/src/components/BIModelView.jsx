@@ -1332,44 +1332,48 @@ const BIModelView = ({
             {/* Modals: outside canvas so backdrop covers full Model View + fixed to viewport */}
             {showSqlImportModal && (
                     <div className="bi-model-modal-backdrop" onMouseDown={() => setShowSqlImportModal(false)}>
-                        <div className="bi-model-modal" onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="bi-model-modal bi-model-modal--sql-import" onMouseDown={(e) => e.stopPropagation()}>
                             <div className="bi-model-modal-header">
                                 <div className="bi-model-modal-title">Add Database Table</div>
                                 <button className="bi-model-modal-close" onClick={() => setShowSqlImportModal(false)}>✕</button>
                             </div>
-                            <div className="bi-model-modal-body">
-                                {userId ? (
-                                    <div className="bi-model-saved-block">
-                                        <div className="bi-model-saved-title">Recent connections</div>
-                                        {savedProfiles.length === 0 && (
-                                            <p className="bi-model-saved-hint">Save a connection from Get Data → PostgreSQL to reuse it here.</p>
-                                        )}
-                                        {savedProfiles.map((p) => (
-                                            <div key={p.id} className="bi-model-saved-row">
-                                                <div className="bi-model-saved-meta">
-                                                    <span className="bi-model-saved-name">{p.connection_name}</span>
-                                                    <span className="bi-model-saved-sub">
-                                                        {p.host}:{p.port} · {p.database} · {p.db_type}
-                                                        {p.ssl ? ' · SSL' : ''}
-                                                    </span>
-                                                </div>
-                                                <div className="bi-model-saved-actions">
-                                                    <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => activateSavedProfile(p.id)} disabled={schemaLoading}>
-                                                        Connect
-                                                    </button>
-                                                    <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => setEditingProfile(p)}>
-                                                        Edit
-                                                    </button>
-                                                    <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => deleteSavedProfile(p.id)}>
-                                                        Delete
-                                                    </button>
-                                                </div>
+                            <div className="bi-model-modal-body bi-model-sql-import-body">
+                                <div className="bi-model-sql-import-split">
+                                    {userId ? (
+                                        <aside className="bi-model-sql-sidebar" aria-label="Saved connections">
+                                            <div className="bi-model-saved-block">
+                                                <div className="bi-model-saved-title">Recent connections</div>
+                                                {savedProfiles.length === 0 && (
+                                                    <p className="bi-model-saved-hint">Save a connection from Get Data → PostgreSQL to reuse it here.</p>
+                                                )}
+                                                {savedProfiles.map((p) => (
+                                                    <div key={p.id} className="bi-model-saved-row">
+                                                        <div className="bi-model-saved-meta">
+                                                            <span className="bi-model-saved-name">{p.connection_name}</span>
+                                                            <span className="bi-model-saved-sub">
+                                                                {p.host}:{p.port} · {p.database} · {p.db_type}
+                                                                {p.ssl ? ' · SSL' : ''}
+                                                            </span>
+                                                        </div>
+                                                        <div className="bi-model-saved-actions">
+                                                            <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => activateSavedProfile(p.id)} disabled={schemaLoading}>
+                                                                Connect
+                                                            </button>
+                                                            <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => setEditingProfile(p)}>
+                                                                Edit
+                                                            </button>
+                                                            <button type="button" className="bi-model-btn bi-model-btn-tiny" onClick={() => deleteSavedProfile(p.id)}>
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
-                                ) : null}
+                                        </aside>
+                                    ) : null}
 
-                                <div className="bi-model-rel-form bi-model-sql-import-form">
+                                    <div className="bi-model-sql-main">
+                                        <div className="bi-model-rel-form bi-model-sql-import-form">
                                     <label className="bi-model-field">
                                         <span>Active session</span>
                                         <select value={selectedConn} onChange={(e) => handleConnChange(e.target.value)}>
@@ -1436,6 +1440,8 @@ const BIModelView = ({
                                             <span className="bi-model-saved-hint">Loading tables…</span>
                                         )}
                                     </label>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div className="bi-model-modal-footer">

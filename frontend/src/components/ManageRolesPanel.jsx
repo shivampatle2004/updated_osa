@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Lock, Plus, Trash2, X, Shield, ChevronDown, Loader } from 'lucide-react';
+import { Lock, Plus, Trash2, X, Shield, Loader } from 'lucide-react';
 import {
   getRoles,
   createRole,
@@ -271,14 +271,10 @@ export default function ManageRolesPanel({ fileId, onClose }) {
             <div className="mrp-sidebar-header">Roles</div>
             <div className="mrp-roles-list">
               {loading && (
-                <div style={{ padding: '16px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                  Loading…
-                </div>
+                <div className="mrp-sidebar-empty">Loading…</div>
               )}
               {!loading && roles.length === 0 && (
-                <div style={{ padding: '16px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                  No roles yet
-                </div>
+                <div className="mrp-sidebar-empty">No roles yet</div>
               )}
               {roles.map((role) => (
                 <div
@@ -287,7 +283,9 @@ export default function ManageRolesPanel({ fileId, onClose }) {
                   onClick={() => selectRole(role)}
                   title={role.name}
                 >
-                  <div className="mrp-role-item-icon">🛡️</div>
+                  <div className="mrp-role-item-icon">
+                    <Shield size={15} strokeWidth={2.2} />
+                  </div>
                   <span className="mrp-role-name">{role.name}</span>
                   <span className="mrp-role-badge">{(role.rules || []).length}</span>
                   <button
@@ -319,7 +317,7 @@ export default function ManageRolesPanel({ fileId, onClose }) {
                 <div className="mrp-editor-content">
                   {/* Role meta */}
                   <div className="mrp-field-row">
-                    <div className="mrp-field" style={{ flex: 1.5 }}>
+                    <div className="mrp-field mrp-field-grow">
                       <label>Role Name</label>
                       <input
                         ref={nameRef}
@@ -327,15 +325,13 @@ export default function ManageRolesPanel({ fileId, onClose }) {
                         value={draftName}
                         onChange={(e) => setDraftName(e.target.value)}
                         placeholder="e.g. West Region Manager"
-                        style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
                       />
                     </div>
-                    <div className="mrp-field" style={{ flex: 1 }}>
+                    <div className="mrp-field mrp-field-compact">
                       <label>Permission</label>
                       <select
                         value={draftPermission}
                         onChange={(e) => setDraftPermission(e.target.value)}
-                        style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
                       >
                         <option value="view">Can View</option>
                         <option value="edit">Can Edit</option>
@@ -343,14 +339,14 @@ export default function ManageRolesPanel({ fileId, onClose }) {
                       </select>
                     </div>
                   </div>
-                  <div className="mrp-field-row">
-                    <div className="mrp-field" style={{ flex: 1 }}>
+                  <div className="mrp-field-row mrp-field-row-stack">
+                    <div className="mrp-field mrp-field-full">
                       <label>Description</label>
-                      <input
+                      <textarea
                         value={draftDesc}
                         onChange={(e) => setDraftDesc(e.target.value)}
                         placeholder="Optional description"
-                        style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
+                        rows={3}
                       />
                     </div>
                   </div>
