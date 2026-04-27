@@ -378,3 +378,24 @@
     font-size: 13px;
     color: #605e5c;
 }
+
+/* ─── Delete Button ─── */
+.bi-file-delete-btn {
+    background-color: #fee2e2;
+    border: 1px solid #ef4444;
+    color: #e11d48;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    margin-left: auto;
+    z-index: 10;
+}
+
+.bi-file-delete-btn:hover {
+    background-color: #fecaca;
+    color: #be123c;
+}

@@ -85,6 +85,26 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
         }
     };
 
+    const handleDeleteFile = async (e, file) => {
+        e.stopPropagation();
+        if (window.confirm(`Are you sure you want to delete "${file.fileName}"? This will permanently remove all associated data and visualizations.`)) {
+            try {
+                const response = await fetch(`/api/files/${file.id}`, {
+                    method: 'DELETE',
+                });
+                if (response.ok) {
+                    setRecentFiles(prev => prev.filter(f => f.id !== file.id));
+                } else {
+                    const err = await response.json();
+                    alert(`Failed to delete file: ${err.detail || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Delete failed', error);
+                alert('An error occurred while deleting the file.');
+            }
+        }
+    };
+
     const renderMainContent = () => {
         if (activeSection === 'open') {
             return (
@@ -106,6 +126,41 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
                             </div>
                         </div>
                     </div>
+
+                    {recentFiles.length > 0 && (
+                        <div style={{ marginTop: '32px' }}>
+                            <h3 className="bi-file-section-title" style={{ marginBottom: '12px' }}>Recent</h3>
+                            <div className="bi-recent-files-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {recentFiles.map(file => (
+                                    <div
+                                        key={`open-recent-${file.id}`}
+                                        className="bi-open-option"
+                                        style={{ padding: '10px 16px', gap: '12px' }}
+                                        onClick={() => {
+                                            onClose();
+                                            onAction('open_recent', file);
+                                        }}
+                                    >
+                                        <div className="bi-open-option-icon" style={{ fontSize: '20px', width: '28px' }}>📄</div>
+                                        <div style={{ flex: 1 }}>
+                                            <div className="bi-open-option-label" style={{ fontSize: '13px' }}>{file.fileName}</div>
+                                            <div className="bi-open-option-sub" style={{ fontSize: '11px' }}>{formatFileDateTime(file)}</div>
+                                        </div>
+                                        <button 
+                                            className="bi-file-delete-btn" 
+                                            onClick={(e) => handleDeleteFile(e, file)}
+                                            title="Delete file"
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                                <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -190,10 +245,20 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
                                     }}
                                 >
                                     <div className="bi-open-option-icon" style={{ fontSize: '20px', width: '28px' }}>📄</div>
-                                    <div>
+                                    <div style={{ flex: 1 }}>
                                         <div className="bi-open-option-label" style={{ fontSize: '13px' }}>{file.fileName}</div>
                                         <div className="bi-open-option-sub" style={{ fontSize: '11px' }}>{formatFileDateTime(file)}</div>
                                     </div>
+                                    <button 
+                                        className="bi-file-delete-btn" 
+                                        onClick={(e) => handleDeleteFile(e, file)}
+                                        title="Delete file"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                            <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+                                        </svg>
+                                    </button>
                                 </div>
                             ))}
                         </div>
