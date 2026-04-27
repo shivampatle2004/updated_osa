@@ -197,11 +197,15 @@ def create_report(payload: Dict[str, Any] = Body(...), db: Session = Depends(get
     Supports both the new 'layout' format and the legacy 'elements'/'data_sources' format.
     """
     try:
+        logger.info("📝 [CREATE] Received report creation request")
+        logger.debug(f"📝 [CREATE] Payload keys: {list(payload.keys())}")
+        
         # Detect legacy format and translate to new layout_json structure
         layout = payload.get("layout", {})
         datasource_mapping = payload.get("datasource_mapping", {})
         
         if not layout and "elements" in payload:
+            logger.info("📝 [CREATE] Legacy format detected, translating...")
             # Legacy format detected
             layout = {
                 "pages": [
@@ -217,14 +221,31 @@ def create_report(payload: Dict[str, Any] = Body(...), db: Session = Depends(get
             }
             
             # Map legacy data_sources to datasource_mapping
-            # In the legacy format, we usually had a data_source_index in element config
-            # We'll try to preserve what we can.
             if "data_sources" in payload:
                 for idx, ds in enumerate(payload["data_sources"]):
-                    # We don't have a stable element ID mapping here, 
-                    # but the elements themselves have IDs in the new system.
-                    pass 
-
+                    pass
+        
+        # Analyze what we're storing
+        total_elements = sum(len(page.get("elements", [])) for page in layout.get("pages", []))
+        charts_with_inline_data = 0
+        total_inline_rows = 0
+        
+        for page in layout.get("pages", []):
+            for el in page.get("elements", []):
+                if el.get("type") == "chart" and el.get("config", {}).get("chart_data"):
+                    charts_with_inline_data += 1
+                    total_inline_rows += len(el.get("config", {}).get("chart_data", []))
+        
+        layout_json_size = len(str(layout)) / 1024  # KB
+        
+        logger.info(f"📝 [CREATE] Report structure:")
+        logger.info(f"  - Pages: {len(layout.get('pages', []))}")
+        logger.info(f"  - Total elements: {total_elements}")
+        logger.info(f"  - Charts with inline data: {charts_with_inline_data}")
+        logger.info(f"  - Total inline data rows: {total_inline_rows}")
+        logger.info(f"  - Layout JSON size: {layout_json_size:.2f} KB")
+        logger.info(f"  - Vault mappings: {len(datasource_mapping)}")
+        
         report = models.PaginatedReport(
             name=payload.get("name", "Untitled Report"),
             description=payload.get("description"),
@@ -237,39 +258,115 @@ def create_report(payload: Dict[str, Any] = Body(...), db: Session = Depends(get
         db.add(report)
         db.commit()
         db.refresh(report)
+        
+        logger.info(f"✅ [CREATE] Report created successfully: ID={report.id}")
+        
+        # Verify data was stored
+        verify_layout = report.layout_json
+        verify_charts = sum(
+            1 for p in verify_layout.get("pages", [])
+            for e in p.get("elements", [])
+            if e.get("type") == "chart" and e.get("config", {}).get("chart_data")
+        )
+        logger.info(f"✅ [CREATE] Verification - Charts with data in DB: {verify_charts}")
+        
         return report
     except Exception as e:
-        logger.error(f"Error creating report: {e}")
+        logger.error(f"❌ [CREATE] Error creating report: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{report_id}")
 def get_report(report_id: str, db: Session = Depends(get_db)):
     """Get a single report definition."""
+    logger.info(f"🔍 [RETRIEVE] Fetching report: {report_id}")
+    
     report = db.query(models.PaginatedReport).filter(models.PaginatedReport.id == report_id).first()
     if not report:
+        logger.warning(f"❌ [RETRIEVE] Report not found: {report_id}")
         raise HTTPException(status_code=404, detail="Report not found")
+    
+    # Log what we're returning
+    pages = report.layout_json.get("pages", [])
+    total_elements = sum(len(p.get("elements", [])) for p in pages)
+    charts_with_data = sum(
+        1 for p in pages
+        for e in p.get("elements", [])
+        if e.get("type") == "chart" and e.get("config", {}).get("chart_data")
+    )
+    total_inline_rows = sum(
+        len(e.get("config", {}).get("chart_data", []))
+        for p in pages
+        for e in p.get("elements", [])
+        if e.get("type") == "chart" and e.get("config", {}).get("chart_data")
+    )
+    
+    logger.info(f"✅ [RETRIEVE] Report found:")
+    logger.info(f"  - Pages: {len(pages)}")
+    logger.info(f"  - Total elements: {total_elements}")
+    logger.info(f"  - Charts with inline data: {charts_with_data}")
+    logger.info(f"  - Total inline rows: {total_inline_rows}")
+    logger.info(f"  - Vault mappings: {len(report.datasource_mapping or {})}")
+    
     return report
 
 @router.put("/{report_id}")
 def update_report(report_id: str, payload: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     """Update an existing report definition."""
     try:
+        logger.info(f"📝 [UPDATE] Updating report: {report_id}")
+        
         report = db.query(models.PaginatedReport).filter(models.PaginatedReport.id == report_id).first()
         if not report:
+            logger.warning(f"❌ [UPDATE] Report not found: {report_id}")
             raise HTTPException(status_code=404, detail="Report not found")
         
-        if "name" in payload: report.name = payload["name"]
-        if "description" in payload: report.description = payload["description"]
-        if "layout" in payload: report.layout_json = payload["layout"]
-        if "datasource_mapping" in payload: report.datasource_mapping = payload["datasource_mapping"]
-        if "parameters" in payload: report.parameters = payload["parameters"]
+        # Log what fields are being updated
+        fields_to_update = [k for k in ["name", "description", "layout", "datasource_mapping", "parameters"] if k in payload]
+        logger.info(f"📝 [UPDATE] Fields to update: {fields_to_update}")
+        
+        if "name" in payload:
+            logger.info(f"📝 [UPDATE] Name: {payload['name']}")
+            report.name = payload["name"]
+        
+        if "description" in payload:
+            report.description = payload["description"]
+        
+        if "layout" in payload:
+            layout = payload["layout"]
+            charts_with_data = sum(
+                1 for p in layout.get("pages", [])
+                for e in p.get("elements", [])
+                if e.get("type") == "chart" and e.get("config", {}).get("chart_data")
+            )
+            layout_size = len(str(layout)) / 1024
+            logger.info(f"📝 [UPDATE] Layout: {len(layout.get('pages', []))} pages, {charts_with_data} charts with inline data, size {layout_size:.2f} KB")
+            report.layout_json = layout
+        
+        if "datasource_mapping" in payload:
+            logger.info(f"📝 [UPDATE] Vault mappings: {len(payload['datasource_mapping'])}")
+            report.datasource_mapping = payload["datasource_mapping"]
+        
+        if "parameters" in payload:
+            logger.info(f"📝 [UPDATE] Parameters: {len(payload.get('parameters', []))}")
+            report.parameters = payload["parameters"]
         
         db.commit()
         db.refresh(report)
+        
+        # Verify data was saved
+        verify_charts = sum(
+            1 for p in report.layout_json.get("pages", [])
+            for e in p.get("elements", [])
+            if e.get("type") == "chart" and e.get("config", {}).get("chart_data")
+        )
+        logger.info(f"✅ [UPDATE] Report updated successfully. Verified charts with data: {verify_charts}")
+        
         return report
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating report {report_id}: {e}")
+        logger.error(f"❌ [UPDATE] Error updating report {report_id}: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -380,3 +477,115 @@ def export_report_pdf(report_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"PDF Export failed for report {report_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── DIAGNOSTIC ENDPOINTS ────────────────────────────────────────────────────
+
+@router.get("/diagnose/cache-stats")
+def get_cache_stats():
+    """🔍 Get current data cache statistics."""
+    logger.info("🔍 [CACHE] Retrieving cache statistics")
+    from services.data_processor import DataProcessor
+    stats = DataProcessor.get_cache_stats()
+    logger.info(f"🔍 [CACHE] Stats: {stats}")
+    return {
+        "status": "ok",
+        "cache": stats,
+        "info": "Cache stores DataFrames from uploaded files in memory for faster access"
+    }
+
+@router.post("/diagnose/cache-clear")
+def clear_cache_endpoint(file_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """🔍 Clear data cache (optionally for a specific file)."""
+    from services.data_processor import DataProcessor
+    
+    if file_id:
+        # Find the file path from database
+        try:
+            file_record = db.query(models.UploadedFile).filter(models.UploadedFile.id == file_id).first()
+            if file_record:
+                from routers.files import resolve_stored_file_path
+                file_path = resolve_stored_file_path(file_record)
+                if file_path:
+                    logger.info(f"🔍 [CACHE] Clearing cache for file: {file_id}")
+                    result = DataProcessor.clear_cache_for_file(file_path)
+                    return {
+                        "status": "cleared",
+                        "file_id": file_id,
+                        "result": result
+                    }
+        except Exception as e:
+            logger.error(f"🔍 [CACHE] Error clearing file cache: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        logger.info("🔍 [CACHE] Clearing all cache")
+        result = DataProcessor.clear_cache()
+        return {
+            "status": "cleared",
+            "result": result,
+            "info": "All cached DataFrames have been removed from memory"
+        }
+
+@router.get("/{report_id}/diagnose")
+def diagnose_report(report_id: str, db: Session = Depends(get_db)):
+    """
+    🔍 Diagnostic endpoint to inspect raw report data in database.
+    Helps troubleshoot data persistence issues.
+    """
+    logger.info(f"🔍 [DIAGNOSE] Starting diagnostic for report: {report_id}")
+    
+    report = db.query(models.PaginatedReport).filter(models.PaginatedReport.id == report_id).first()
+    if not report:
+        logger.warning(f"🔍 [DIAGNOSE] Report not found: {report_id}")
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    try:
+        # Analyze layout_json
+        layout = report.layout_json or {}
+        pages = layout.get("pages", [])
+        
+        all_elements = []
+        for page_idx, page in enumerate(pages):
+            for el_idx, el in enumerate(page.get("elements", [])):
+                all_elements.append({
+                    "page": page_idx,
+                    "index": el_idx,
+                    "id": el.get("id"),
+                    "type": el.get("type"),
+                    "title": el.get("config", {}).get("title"),
+                    "has_chart_data": bool(el.get("config", {}).get("chart_data")),
+                    "chart_data_rows": len(el.get("config", {}).get("chart_data", [])),
+                    "chart_data_size_kb": len(str(el.get("config", {}).get("chart_data", []))) / 1024,
+                    "has_vault_id": bool(el.get("config", {}).get("vault_id")),
+                    "vault_id": el.get("config", {}).get("vault_id"),
+                })
+        
+        diagnosis = {
+            "report_id": report.id,
+            "name": report.name,
+            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "updated_at": report.updated_at.isoformat() if report.updated_at else None,
+            "layout_json_size_kb": len(str(report.layout_json)) / 1024,
+            "datasource_mapping_size_kb": len(str(report.datasource_mapping)) / 1024,
+            "pages_count": len(pages),
+            "total_elements": len(all_elements),
+            "elements": all_elements,
+            "charts_summary": {
+                "total_charts": sum(1 for el in all_elements if el["type"] == "chart"),
+                "charts_with_inline_data": sum(1 for el in all_elements if el["type"] == "chart" and el["has_chart_data"]),
+                "charts_with_vault_id": sum(1 for el in all_elements if el["type"] == "chart" and el["has_vault_id"]),
+                "total_inline_rows": sum(el["chart_data_rows"] for el in all_elements if el["has_chart_data"]),
+                "total_inline_data_size_kb": sum(el["chart_data_size_kb"] for el in all_elements if el["has_chart_data"]),
+            },
+            "vault_mappings_count": len(report.datasource_mapping or {}),
+            "parameters_count": len(report.parameters or []),
+        }
+        
+        logger.info(f"✅ [DIAGNOSE] Diagnostic complete for {report_id}")
+        logger.info(f"📊 [DIAGNOSE] Summary: {diagnosis['charts_summary']}")
+        
+        return diagnosis
+    
+    except Exception as e:
+        logger.error(f"❌ [DIAGNOSE] Error during diagnosis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Diagnostic failed: {str(e)}")

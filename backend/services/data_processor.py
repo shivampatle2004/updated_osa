@@ -13,21 +13,64 @@ class DataProcessor:
     _MAX_CACHE_SIZE = 5 # Store up to 5 large DataFrames in memory
 
     @staticmethod
-    def read_file(file_path: str) -> pd.DataFrame:
-        current_mtime = os.path.getmtime(file_path)
-        
+    def get_cache_stats():
+        """Get current cache statistics for diagnostics."""
         with DataProcessor._cache_lock:
-            # Check if file is in cache and has not been modified
+            total_size = sum(
+                df.memory_usage(deep=True).sum() / (1024*1024)
+                for df, _, _ in DataProcessor._df_cache.values()
+            )
+            return {
+                "cached_files": len(DataProcessor._df_cache),
+                "total_memory_mb": total_size,
+                "max_size": DataProcessor._MAX_CACHE_SIZE,
+                "files": list(DataProcessor._df_cache.keys())
+            }
+    
+    @staticmethod
+    def clear_cache():
+        """Clear all cached DataFrames."""
+        with DataProcessor._cache_lock:
+            cleared_count = len(DataProcessor._df_cache)
+            DataProcessor._df_cache.clear()
+            print(f"✅ Cache cleared: {cleared_count} files removed")
+            return {"cleared": cleared_count}
+    
+    @staticmethod
+    def clear_cache_for_file(file_path: str):
+        """Clear cache for a specific file."""
+        with DataProcessor._cache_lock:
             if file_path in DataProcessor._df_cache:
-                cached_df, cached_time, cached_mtime = DataProcessor._df_cache[file_path]
-                if cached_mtime == current_mtime:
-                    print(f"DEBUG: Cache HIT for {file_path}")
-                    # Update access time
-                    DataProcessor._df_cache[file_path] = (cached_df, time.time(), cached_mtime)
-                    return cached_df
+                del DataProcessor._df_cache[file_path]
+                print(f"✅ Cache cleared for: {file_path}")
+                return {"cleared": True, "file": file_path}
+            return {"cleared": False, "message": "File not in cache"}
+
+    @staticmethod
+    def read_file(file_path: str, skip_cache: bool = False) -> pd.DataFrame:
+        current_mtime = os.path.getmtime(file_path)
+        file_size_mb = os.path.getsize(file_path) / (1024*1024)
+        
+        if skip_cache:
+            print(f"📖 [Cache SKIP] Reading {file_path} (size: {file_size_mb:.2f}MB) - cache disabled")
+        else:
+            with DataProcessor._cache_lock:
+                # Check if file is in cache and has not been modified
+                if file_path in DataProcessor._df_cache:
+                    cached_df, cached_time, cached_mtime = DataProcessor._df_cache[file_path]
+                    if cached_mtime == current_mtime:
+                        cache_age_secs = time.time() - cached_time
+                        rows = len(cached_df)
+                        cols = len(cached_df.columns)
+                        print(f"✅ Cache HIT for {file_path} ({rows} rows × {cols} cols, age: {cache_age_secs:.1f}s)")
+                        # Update access time
+                        DataProcessor._df_cache[file_path] = (cached_df, time.time(), cached_mtime)
+                        return cached_df
+                    else:
+                        print(f"⚠️ Cache INVALID for {file_path} - file was modified, reading fresh")
 
         # Cache miss or modified file
-        print(f"DEBUG: Cache MISS for {file_path}. Reading from disk...")
+        print(f"📖 [Cache MISS] Reading {file_path} from disk (size: {file_size_mb:.2f}MB)...")
         extension = file_path.split(".")[-1].lower()
         
         # Optimization: use engine='pyarrow' for CSV if possible
@@ -260,7 +303,7 @@ class DataProcessor:
 
             # Second: try parsing datetime
             try:
-                pd.to_datetime(sample, errors="raise")
+                pd.to_datetime(sample, errors="raise", format="mixed")
                 types[col] = "datetime"
             except Exception:
                 types[col] = "categorical"

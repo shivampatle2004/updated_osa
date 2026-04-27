@@ -529,15 +529,48 @@ class GraphEngine:
                         agg_df = df[[x]].copy()
                         agg_df[y] = numeric_series
                         agg_df = agg_df.dropna(subset=[y])
+                        # Cross-table visuals can produce sparse rows where X is null
+                        # after model merges/concats. Preserve those rows as "Unknown"
+                        # instead of letting groupby(dropna=True) remove all points.
+                        agg_df[x] = (
+                            agg_df[x]
+                            .astype(str)
+                            .replace("nan", "Unknown")
+                            .fillna("Unknown")
+                        )
 
                         if aggregation == "sum":
-                            result = agg_df.groupby(x)[y].sum().sort_values(ascending=False).reset_index(name=y)
+                            result = (
+                                agg_df
+                                .groupby(x, dropna=False)[y]
+                                .sum()
+                                .sort_values(ascending=False)
+                                .reset_index(name=y)
+                            )
                         elif aggregation == "mean":
-                            result = agg_df.groupby(x)[y].mean().sort_values(ascending=False).reset_index(name=y)
+                            result = (
+                                agg_df
+                                .groupby(x, dropna=False)[y]
+                                .mean()
+                                .sort_values(ascending=False)
+                                .reset_index(name=y)
+                            )
                         elif aggregation == "max":
-                            result = agg_df.groupby(x)[y].max().sort_values(ascending=False).reset_index(name=y)
+                            result = (
+                                agg_df
+                                .groupby(x, dropna=False)[y]
+                                .max()
+                                .sort_values(ascending=False)
+                                .reset_index(name=y)
+                            )
                         elif aggregation == "min":
-                            result = agg_df.groupby(x)[y].min().sort_values(ascending=True).reset_index(name=y)
+                            result = (
+                                agg_df
+                                .groupby(x, dropna=False)[y]
+                                .min()
+                                .sort_values(ascending=True)
+                                .reset_index(name=y)
+                            )
                         else:
                             return {"labels": [], "values": []}
                         
