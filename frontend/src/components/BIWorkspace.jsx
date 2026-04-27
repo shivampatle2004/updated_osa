@@ -3503,15 +3503,26 @@ const BIWorkspace = ({
                 </div>
               </div>
 
+                </div>
+              </div>
+
               <div className="sql-modal-footer">
                 <button type="button" className="sql-btn sql-btn-secondary" onClick={() => setShowSqlModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="sql-btn sql-btn-primary" disabled={isSqlConnecting}>
-                  {isSqlConnecting ? 'Connecting...' : 'Connect'}
+                <button type="submit" className="sql-btn sql-btn-primary" disabled={isSqlConnecting} id="sql-connect-btn">
+                  {isSqlConnecting ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <RefreshCw size={16} className="spin" />
+                      Connecting...
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Database size={16} />
+                      Connect
+                    </span>
+                  )}
                 </button>
-              </div>
-                </div>
               </div>
             </form>
           </div>
