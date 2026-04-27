@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, JSON, Table, Text, Boolean, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, JSON, Table, Text, Boolean, Index, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -501,8 +501,6 @@ class ChangeDetectionConfig(Base):
     status = Column(String(50), default="Monitoring")  # "Monitoring", "Changed", "Error"
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
 # ROW-LEVEL SECURITY (RLS) MODELS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -570,3 +568,208 @@ class RLSRule(Base):
 
     def __repr__(self):
         return f"<RLSRule({self.table_name}.{self.column_name} {self.operator} '{self.value}')>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW DATA STORAGE MODELS - PostgreSQL-Based Worksheet Architecture
+# Replaces memory-based caching with persistent database storage
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Worksheet(Base):
+    """
+    A persistent worksheet (dataset) stored in PostgreSQL.
+    Replaces memory-based storage model.
+    Can be created from: file upload, connector extraction, SQL query result
+    """
+    __tablename__ = "worksheets"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    
+    # Metadata
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    
+    # Owner and access control
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    is_shared = Column(Boolean, default=False, index=True)
+    sharing_type = Column(String(50), default="private")  # private, organization, public
+    
+    # Source information
+    source_type = Column(String(50))  # file_upload, connector, sql_query, etl_output
+    source_id = Column(String(255))   # uploaded_files.id, connector_id, etc
+    
+    # Data statistics
+    total_rows = Column(Integer, default=0)
+    column_count = Column(Integer, default=0)
+    size_bytes = Column(Integer, default=0)
+    
+    # Status
+    status = Column(String(50), default="pending")  # pending, processing, ready, failed
+    error_message = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    owner = relationship("User")
+    columns = relationship("WorksheetColumn", back_populates="worksheet", cascade="all, delete-orphan")
+    permissions = relationship("WorksheetPermission", back_populates="worksheet", cascade="all, delete-orphan")
+    import_queue = relationship("DataImportQueue", back_populates="worksheet", uselist=False, cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Worksheet(id='{self.id}', name='{self.name}', rows={self.total_rows})>"
+
+
+class WorksheetColumn(Base):
+    """
+    Schema definition for a column in a worksheet.
+    Stores column metadata and statistics.
+    """
+    __tablename__ = "worksheet_columns"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    worksheet_id = Column(String, ForeignKey("worksheets.id"), nullable=False, index=True)
+    
+    # Column metadata
+    column_name = Column(String(255), nullable=False)
+    display_name = Column(String(255))
+    data_type = Column(String(50))  # integer, string, float, date, boolean, json, etc
+    
+    # Statistics
+    null_count = Column(Integer, default=0)
+    unique_count = Column(Integer, default=0)
+    min_value = Column(Text, nullable=True)  # Stored as string for flexibility
+    max_value = Column(Text, nullable=True)
+    
+    # Optimization
+    column_order = Column(Integer)
+    is_indexed = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    worksheet = relationship("Worksheet", back_populates="columns")
+    
+    __table_args__ = (
+        Index('idx_ws_col', 'worksheet_id', 'column_name'),
+    )
+    
+    def __repr__(self):
+        return f"<WorksheetColumn(worksheet={self.worksheet_id}, name='{self.column_name}')>"
+
+
+class WorksheetData(Base):
+    """
+    Actual data rows for a worksheet.
+    Uses flexible schema: JSON storage for all column values.
+    Supports 10M+ rows efficiently through partitioning.
+    """
+    __tablename__ = "worksheet_data"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    worksheet_id = Column(String, ForeignKey("worksheets.id"), nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)  # For ordering without relying on ID
+    
+    # Flexible data storage - JSON format: { col_name: value, ... }
+    data_json = Column(JSON)  # Main data storage
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_ws_data_ws', 'worksheet_id'),
+        Index('idx_ws_data_row', 'worksheet_id', 'row_number'),
+    )
+    
+    def __repr__(self):
+        return f"<WorksheetData(worksheet={self.worksheet_id}, row={self.row_number})>"
+
+
+class WorksheetPermission(Base):
+    """
+    Access control for worksheets.
+    Defines who can access which worksheet and what they can do.
+    """
+    __tablename__ = "worksheet_permissions"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    worksheet_id = Column(String, ForeignKey("worksheets.id"), nullable=False, index=True)
+    
+    # Who has access
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # NULL = org-wide
+    
+    # What they can do
+    permission_level = Column(String(50), default="view")  # view, edit, admin
+    can_export = Column(Boolean, default=True)
+    can_share = Column(Boolean, default=False)
+    
+    # Audit
+    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    worksheet = relationship("Worksheet", back_populates="permissions")
+    
+    __table_args__ = (
+        Index('idx_perm_user', 'user_id'),
+        Index('idx_perm_ws', 'worksheet_id'),
+    )
+    
+    def __repr__(self):
+        return f"<WorksheetPermission(ws={self.worksheet_id}, user={self.user_id}, level={self.permission_level})>"
+
+
+class DataImportQueue(Base):
+    """
+    Tracks progress of large data imports.
+    One entry per worksheet during import process.
+    """
+    __tablename__ = "data_import_queue"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    worksheet_id = Column(String, ForeignKey("worksheets.id"), nullable=False, unique=True, index=True)
+    
+    # Progress tracking
+    status = Column(String(50), default="pending")  # pending, processing, completed, failed
+    progress_percent = Column(Integer, default=0)
+    rows_processed = Column(Integer, default=0)
+    rows_failed = Column(Integer, default=0)
+    
+    # Error tracking
+    error_message = Column(Text, nullable=True)
+    
+    # Timestamps
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    worksheet = relationship("Worksheet", back_populates="import_queue")
+    
+    def __repr__(self):
+        return f"<DataImportQueue(ws={self.worksheet_id}, status={self.status}, progress={self.progress_percent}%)>"
+
+
+class WorksheetTransformation(Base):
+    """
+    Stores transformation operations applied to a worksheet.
+    For staging data before applying transformations permanently.
+    """
+    __tablename__ = "worksheet_transformations"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    worksheet_id = Column(String, ForeignKey("worksheets.id"), nullable=False, index=True)
+    
+    # Transformation details
+    transformation_type = Column(String(50))  # filter, group_by, aggregate, join, etc
+    transformation_config = Column(JSON)  # Configuration for this transformation
+    
+    # Results
+    result_row_count = Column(Integer)
+    is_applied = Column(Boolean, default=False)
+    
+    # Audit
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    def __repr__(self):
+        return f"<WorksheetTransformation(ws={self.worksheet_id}, type={self.transformation_type})>"

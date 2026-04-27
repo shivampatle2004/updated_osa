@@ -268,6 +268,7 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
         await loop.run_in_executor(None, _write)
 
         # ── Auto-save the extracted dataset to DataVault ──────────────────────
+        vault_item_id = None
         try:
             from database import SessionLocal
             from models import DataVaultItem
@@ -277,11 +278,12 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
                 existing = db_session.query(DataVaultItem).filter(
                     DataVaultItem.table_name == table_name
                 ).first()
-                
+
                 if existing:
                     existing.row_count = len(df)
                     existing.column_count = len(df.columns)
                     db_session.commit()
+                    vault_item_id = existing.id
                 else:
                     item = DataVaultItem(
                         user_id=payload.get("user_id"),
@@ -295,10 +297,46 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
                     )
                     db_session.add(item)
                     db_session.commit()
+                    vault_item_id = item.id
             finally:
                 db_session.close()
         except Exception as vault_err:
             logger.error(f"WARNING: DataVault auto-save failed for '{engine}': {vault_err}")
+
+        # ── Auto-save to Worksheet (persistent JSON rows in DB) ───────────────
+        try:
+            import pandas as _pd_ws
+            import services.worksheet_service as _ws_svc
+            from database import SessionLocal as _SL
+
+            pandas_df_ws = _pd_ws.DataFrame(df.to_dicts())
+            _db_ws = _SL()
+            try:
+                ws_name = output_file_name or f"{cls.get_display_name()} – {table_name}"
+                ws = _ws_svc.create_worksheet(
+                    db=_db_ws,
+                    name=ws_name,
+                    owner_id=payload.get("user_id"),
+                    source_type="connector",
+                    source_id=engine,
+                )
+                _ws_svc.import_data_from_dataframe(pandas_df_ws, ws.id, db=_db_ws)
+
+                # Store worksheet_id into the DataVaultItem for future lookups
+                if vault_item_id:
+                    _dv = _db_ws.query(DataVaultItem).filter(DataVaultItem.id == vault_item_id).first()
+                    if _dv:
+                        meta = dict(_dv.metadata_json or {})
+                        meta["worksheet_id"] = ws.id
+                        _dv.metadata_json = meta
+                        _db_ws.commit()
+
+                logger.info(f"[Connector] Worksheet {ws.id} created for {engine} extract ({len(pandas_df_ws)} rows)")
+            finally:
+                _db_ws.close()
+        except Exception as ws_err:
+            logger.error(f"WARNING: Worksheet save failed for connector '{engine}': {ws_err}")
+
 
         return {
             "success": True,
@@ -308,7 +346,9 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
         }
 
     except Exception as e:
-        logger.error(f"Quick extract failed for '{engine}': {e}", exc_info=True)
+        import traceback
+        trace = traceback.format_exc()
+        logger.error(f"Quick extract failed for '{engine}': {trace}")
         return {"success": False, "message": f"Quick extract failed: {str(e)}"}
 
 
@@ -328,6 +368,8 @@ async def load_tank(payload: Dict[str, Any] = Body(...)):
     try:
         import polars as pl
         from database import DATABASE_URL
+        import services.worksheet_service as _ws_svc
+        from database import SessionLocal as _SL
 
         df = pl.DataFrame(data, strict=False)
         sync_url = DATABASE_URL
@@ -338,7 +380,36 @@ async def load_tank(payload: Dict[str, Any] = Body(...)):
         _eng2 = _ce2(sync_url)
         pandas_df.to_sql(table_name, con=_eng2, if_exists="replace", index=False)
         _eng2.dispose()
-        return {"success": True, "message": f"Successfully loaded {len(df)} rows to '{table_name}'."}
+
+        worksheet_id = None
+        try:
+            _db_ws = _SL()
+            try:
+                ws_name = payload.get("worksheet_name") or table_name
+                ws = _ws_svc.create_worksheet(
+                    db=_db_ws,
+                    name=ws_name,
+                    owner_id=payload.get("user_id"),
+                    source_type="etl_output",
+                    source_id=table_name,
+                )
+                _ws_svc.import_data_from_dataframe(pandas_df, ws.id, db=_db_ws)
+                worksheet_id = ws.id
+                logger.info(
+                    f"[LoadTank] Persisted {len(pandas_df)} rows to worksheet_data "
+                    f"(worksheet_id={ws.id}, source_table={table_name})"
+                )
+            finally:
+                _db_ws.close()
+        except Exception as ws_err:
+            logger.error(f"Load tank worksheet persistence failed: {ws_err}")
+            return {"success": False, "message": f"Table loaded but worksheet persistence failed: {ws_err}"}
+
+        return {
+            "success": True,
+            "message": f"Successfully loaded {len(df)} rows to '{table_name}'.",
+            "worksheet_id": worksheet_id,
+        }
     except Exception as e:
         logger.error(f"Tank load failed: {e}")
         return {"success": False, "message": str(e)}

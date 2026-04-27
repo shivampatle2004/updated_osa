@@ -1,5 +1,8 @@
 # Python
-backend/__pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+
 backend/venv/
 backend/.env
 backend/analytics.db
@@ -14,6 +17,9 @@ frontend/.vite/
 frontend/dist/
 frontend/.env
 frontend/.next/
+frontend/out/
+frontend/.turbo/
+
 
 # IDEs
 .vscode/
@@ -37,3 +43,14 @@ venv/
 
 # Logs
 *.log
+backend/error_log.txt
+backend/pip_error.txt
+backend/all_files.txt
+
+# Temporary Files
+run.txt
+sth.txt
+test_data.csv
+test_upload.csv
+*.resolved
+backend/static/assets/

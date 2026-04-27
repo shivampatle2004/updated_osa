@@ -11,8 +11,14 @@ from database import SessionLocal, init_db
 import models, schemas
 from auth_utils import get_password_hash, verify_password
 from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls
+from routers.worksheets import router as worksheets_router, files_router as ws_files_router
 import asyncio
+import sys
 from services.modeling_service import change_detection_poller
+
+# Playwright needs subprocess support; ensure Windows uses Proactor loop policy.
+if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="OneStopAnalytics API")
 
@@ -61,11 +67,25 @@ app.include_router(data_vault.router)
 app.include_router(reports.router)
 app.include_router(modeling.router)
 app.include_router(rls.router)
+app.include_router(worksheets_router)
+app.include_router(ws_files_router)
 
 # Initialize DB on startup
 @app.on_event("startup")
 def startup_event():
     print("DEBUG: Application starting up and initializing DB...")
+    
+    # Run Alembic migrations programmatically
+    try:
+        from alembic.config import Config
+        from alembic import command
+        alembic_cfg = Config("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+        print("SUCCESS: Alembic database migrations applied successfully.")
+    except Exception as alembic_err:
+        print(f"WARNING: Alembic migration failed (might be uninitialized): {alembic_err}")
+        traceback.print_exc()
+
     try:
         init_db()
         # Create demo user

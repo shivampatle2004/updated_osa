@@ -146,6 +146,14 @@ const PowerAutomateVisual = ({ visualId }) => {
           setResult(prev => ({ ...prev, has_export: true, status: data.status }));
           return;
         }
+
+        if (data.status === 'failed') {
+          clearInterval(pollTimerRef.current);
+          setPdfPolling(false);
+          setPdfReady(false);
+          setError('PDF snapshot failed on server. Check backend Playwright/Chromium setup.');
+          return;
+        }
       } catch {
         /* keep polling on transient errors */
       }
@@ -153,6 +161,7 @@ const PowerAutomateVisual = ({ visualId }) => {
       if (attempts >= MAX_ATTEMPTS) {
         clearInterval(pollTimerRef.current);
         setPdfPolling(false);
+        setError('PDF snapshot is taking too long. Please check backend logs and retry.');
       }
     }, 2000);
   }, []);

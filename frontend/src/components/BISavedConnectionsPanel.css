@@ -102,7 +102,7 @@
 }
 
 .bi-conn-header-icon {
-  color: #2563eb;
+  color: #744ec2;
   margin-top: 2px;
 }
 
@@ -181,8 +181,8 @@
 }
 
 .bi-conn-search:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: #744ec2;
+  box-shadow: 0 0 0 3px rgba(116, 78, 194, 0.15);
 }
 
 .bi-conn-error {
@@ -247,12 +247,12 @@
 }
 
 .bi-conn-cell--live .bi-conn-card {
-  border-color: #93c5fd;
+  border-color: #744ec2;
 }
 
 .bi-conn-cell--selected .bi-conn-card {
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
-  border-color: #c7d2fe;
+  box-shadow: 0 0 0 2px rgba(116, 78, 194, 0.2);
+  border-color: #744ec2;
 }
 
 .bi-conn-card {
@@ -319,9 +319,9 @@
 }
 
 .bi-conn-card--live {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
-  background: linear-gradient(135deg, #fff 0%, #eff6ff 100%);
+  border-color: #744ec2;
+  box-shadow: 0 0 0 1px rgba(116, 78, 194, 0.12);
+  background: linear-gradient(135deg, #fff 0%, #f5f0ff 100%);
 }
 
 .bi-conn-star {
@@ -470,14 +470,14 @@
 .bi-conn-btn-details {
   gap: 5px !important;
   padding: 6px 9px !important;
-  color: #4f46e5 !important;
-  border-color: #e0e7ff !important;
-  background: #f5f3ff !important;
+  color: #744ec2 !important;
+  border-color: #d8c8f2 !important;
+  background: #f5f0ff !important;
 }
 
 .bi-conn-btn-details:hover:not(:disabled) {
-  background: #ede9fe !important;
-  border-color: #c7d2fe !important;
+  background: #efe7ff !important;
+  border-color: #c8b2eb !important;
 }
 
 @media (max-width: 520px) {
@@ -512,7 +512,7 @@
 }
 
 .bi-conn-btn-primary {
-  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  background: #744ec2;
   border-color: transparent;
   color: #fff;
   padding: 6px 10px;
@@ -778,18 +778,18 @@
 }
 
 .bi-conn-sp-tab--active {
-  color: #4338ca;
+  color: #744ec2;
   background: #fff;
   border-color: #e8edf3;
   border-bottom-color: #fff;
-  box-shadow: 0 -2px 12px rgba(99, 102, 241, 0.08);
+  box-shadow: 0 -2px 12px rgba(116, 78, 194, 0.08);
   position: relative;
   z-index: 1;
 }
 
 .bi-conn-sp-tab:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 2px rgba(116, 78, 194, 0.35);
   border-radius: 12px 12px 0 0;
 }
 
@@ -850,13 +850,13 @@
 }
 
 .bi-conn-report-btn:hover {
-  border-color: #c7d2fe;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.1);
+  border-color: #744ec2;
+  box-shadow: 0 4px 14px rgba(116, 78, 194, 0.1);
 }
 
 .bi-conn-report-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(116, 78, 194, 0.45);
 }
 
 .bi-conn-report-btn--panel {
@@ -873,7 +873,7 @@
 }
 
 .bi-conn-report-btn--panel:hover .bi-conn-report-open {
-  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  background: #744ec2;
   color: #fff;
   border-color: transparent;
 }
@@ -913,9 +913,9 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: #4f46e5;
-  background: #eef2ff;
-  border: 1px solid #e0e7ff;
+  color: #744ec2;
+  background: #f5f0ff;
+  border: 1px solid #d8c8f2;
   border-radius: 10px;
   pointer-events: none;
   transition: background 0.18s, color 0.18s, border-color 0.18s;
@@ -1039,8 +1039,8 @@
 }
 
 .bi-conn-file-toolbar-leading:focus-within {
-  border-color: #a5b4fc;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  border-color: #744ec2;
+  box-shadow: 0 0 0 3px rgba(116, 78, 194, 0.12);
 }
 
 .bi-conn-file-toolbar-leading .bi-conn-file-search-wrap {
@@ -1107,8 +1107,8 @@
 
 .bi-conn-file-search:focus {
   outline: none;
-  border-color: #a5b4fc;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: #744ec2;
+  box-shadow: 0 0 0 3px rgba(116, 78, 194, 0.15);
 }
 
 .bi-conn-file-filter {
@@ -1212,8 +1212,8 @@
 }
 
 .bi-conn-file-card:hover {
-  border-color: #c7d2fe;
-  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.1);
+  border-color: #744ec2;
+  box-shadow: 0 8px 24px rgba(116, 78, 194, 0.1);
   transform: translateY(-1px);
 }
 
@@ -1241,8 +1241,8 @@
 }
 
 .bi-conn-file-icon--csv {
-  background: linear-gradient(145deg, #e0f2fe 0%, #dbeafe 100%);
-  color: #0369a1;
+  background: linear-gradient(145deg, #f5f0ff 0%, #efe7ff 100%);
+  color: #744ec2;
 }
 
 .bi-conn-file-icon--excel {
@@ -1257,8 +1257,8 @@
 
 .bi-conn-file-icon--report,
 .bi-conn-file-icon--other {
-  background: linear-gradient(145deg, #eef2ff 0%, #e0e7ff 100%);
-  color: #4f46e5;
+  background: linear-gradient(145deg, #f5f0ff 0%, #efe7ff 100%);
+  color: #744ec2;
 }
 
 .bi-conn-file-card-head {
@@ -1372,7 +1372,7 @@
 }
 
 .bi-conn-file-pin-toggle--on {
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  background: #744ec2;
 }
 
 .bi-conn-file-pin-toggle--on::after {
@@ -1434,15 +1434,15 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #fff;
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  background: #744ec2;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 2px 8px rgba(116, 78, 194, 0.35);
   transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
 .bi-conn-file-open-btn:hover {
   filter: brightness(1.05);
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
+  box-shadow: 0 4px 14px rgba(116, 78, 194, 0.4);
 }
 
 .bi-conn-file-open-btn:active {

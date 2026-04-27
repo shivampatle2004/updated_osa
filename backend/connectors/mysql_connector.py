@@ -30,6 +30,7 @@ class MySQLConnector(BaseConnector):
                 db=self.config.get("database", ""),
                 user=self.config.get("username", ""),
                 password=self.config.get("password", ""),
+                ssl=True if self.config.get("ssl_mode") and self.config.get("ssl_mode") != "disable" else None,
             )
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1")
@@ -48,8 +49,10 @@ class MySQLConnector(BaseConnector):
         table = self.config.get("table")
         query = self.config.get("query")
         chunk_size = self.config.get("chunk_size", 5000)
-
         conn_str = f"mysql://{username}:{password}@{host}:{port}/{database}"
+        ssl_mode = self.config.get("ssl_mode", "disable")
+        if ssl_mode and ssl_mode != "disable":
+            conn_str += f"?ssl_mode={ssl_mode}"
 
         if query:
             sql = query
@@ -89,6 +92,7 @@ class MySQLConnector(BaseConnector):
                 db=self.config.get("database", ""),
                 user=self.config.get("username", ""),
                 password=self.config.get("password", ""),
+                ssl=True if self.config.get("ssl_mode") and self.config.get("ssl_mode") != "disable" else None,
             )
 
             columns = data.columns

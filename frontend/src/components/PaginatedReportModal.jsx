@@ -1,6 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { X, FileText, Download, Table, BarChart, Trash2, GripVertical } from 'lucide-react';
+import { X, FileText, Download, Table, BarChart, LineChart, Trash2, GripVertical } from 'lucide-react';
 import './PaginatedReportModal.css';
+
+/** Types we can send to the PDF engine as chart elements (must stay in sync with handleGenerate). */
+const CHART_ELEMENT_TYPES = new Set([
+  'bar',
+  'line',
+  'step',
+  'pie',
+  'donut',
+  'area',
+  'column',
+  'stacked_bar',
+  'clustered_bar',
+  'horizontal_bar',
+]);
+
+function mapGraphTypeToPdfChartType(t) {
+  if (t === 'stacked_bar' || t === 'clustered_bar' || t === 'horizontal_bar' || t === 'column') return 'bar';
+  if (t === 'donut') return 'pie';
+  return t;
+}
+
+function formatElementType(type) {
+  if (!type) return '';
+  return String(type).replace(/_/g, ' ');
+}
+
+function getElementPointCount(el) {
+  const c = el?.cached_data;
+  if (!c) return null;
+  if (c.is_table && Array.isArray(c.rows)) return c.rows.length;
+  if (Array.isArray(c.labels)) return c.labels.length;
+  return null;
+}
+
+function getSparklinePercents(el) {
+  const vals = el?.cached_data?.values;
+  if (!Array.isArray(vals) || vals.length === 0) return [];
+  const slice = vals.slice(0, 14);
+  const nums = slice.map((v) => Math.abs(Number(v) || 0));
+  const max = Math.max(...nums, 1e-9);
+  return nums.map((n) => Math.round((n / max) * 100));
+}
 
 const PaginatedReportModal = ({
   isOpen,
@@ -11,8 +53,6 @@ const PaginatedReportModal = ({
   reportElements = [],
   onReportElementsChange
 }) => {
-  if (!isOpen) return null;
-
   const validFileId = fileId || (dataset && dataset.metadata && dataset.metadata.fileId);
 
   const [reportName, setReportName] = useState(fileName ? `${fileName} Report` : 'Paginated Report');
@@ -24,11 +64,7 @@ const PaginatedReportModal = ({
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [includeSummary, setIncludeSummary] = useState(true);
-  const [includeTableData, setIncludeTableData] = useState(true);
-  const [includeCharts, setIncludeCharts] = useState(true);
-  const [localElements, setLocalElements] = useState(() => {
-    return Array.isArray(reportElements) ? reportElements : [];
-  });
+  const [localElements, setLocalElements] = useState(reportElements);
 
   useEffect(() => {
     if (dataset && dataset.columns) {
@@ -38,25 +74,15 @@ const PaginatedReportModal = ({
   }, [dataset]);
 
   useEffect(() => {
-    console.log('Report elements updated:', reportElements?.length);
-    if (Array.isArray(reportElements) && reportElements.length > 0) {
-      setLocalElements(reportElements);
-    }
+    setLocalElements(reportElements);
   }, [reportElements]);
-  
-  useEffect(() => {
-    console.log('Modal opened, localElements:', localElements?.length, reportElements?.length);
-    if (Array.isArray(reportElements)) {
-      setLocalElements(reportElements);
-    }
-  }, [isOpen]);
 
   const removeElement = (elementId) => {
-    setLocalElements(prev => prev.filter(e => e.id !== elementId));
-    if (onReportElementsChange) {
-      const updated = localElements.filter(e => e.id !== elementId);
-      onReportElementsChange(updated);
-    }
+    setLocalElements((prev) => {
+      const updated = prev.filter((e) => e.id !== elementId);
+      onReportElementsChange?.(updated);
+      return updated;
+    });
   };
 
   const toggleColumn = (colName) => {
@@ -79,47 +105,77 @@ const PaginatedReportModal = ({
 
   const handleGenerate = async () => {
     const activeFileId = validFileId;
+    
     setIsGenerating(true);
 
     try {
       const elements = [];
-      const sourceElements = Array.isArray(reportElements) && reportElements.length > 0 ? reportElements : localElements;
       
-      console.log('Elements:', sourceElements?.length, 'includeCharts:', includeCharts);
-      
-      // Add charts
-      for (const el of sourceElements) {
-        if (['bar', 'line', 'pie', 'area', 'column'].includes(el.type)) {
+      for (const el of localElements) {
+        let elementData = null;
+
+        if (el.cached_data) {
+          if (el.type === 'table' && el.cached_data.is_table && Array.isArray(el.cached_data.rows)) {
+            elementData = el.cached_data.rows;
+          } else if (Array.isArray(el.cached_data.labels)) {
+            elementData = el.cached_data.labels.map((label, idx) => ({
+              name: label,
+              value: el.cached_data.values ? el.cached_data.values[idx] : 0
+            }));
+          } else if (
+            CHART_ELEMENT_TYPES.has(el.type) &&
+            Array.isArray(el.cached_data.rows) &&
+            el.cached_data.rows.length > 0
+          ) {
+            elementData = el.cached_data.rows;
+          }
+        }
+        
+        const elementConfig = {
+          title: el.title,
+          xField: el.x_axis || el.config?.x_axis,
+          yField: el.y_axis || el.config?.y_axis,
+          chartType: el.type
+        };
+        
+        if (el.type === 'table' && el.config?.columns) {
+          elements.push({
+            type: 'table',
+            config: {
+              columns: el.config.columns,
+              rows_per_page: rowsPerPage,
+              show_header: showHeader
+            },
+            data: elementData
+          });
+        } else if (CHART_ELEMENT_TYPES.has(el.type)) {
+          const pdfChartType = mapGraphTypeToPdfChartType(el.type);
           elements.push({
             type: 'chart',
-            config: {
-              title: el.title || el.type,
-              xField: el.x_axis,
-              yField: el.y_axis,
-              chartType: el.type,
-              chart_type: el.type
-            },
-            data: null
+            config: { ...elementConfig, chartType: pdfChartType },
+            data: elementData
           });
         } else if (el.type === 'text') {
           elements.push({
             type: 'text',
-            config: { content: el.config?.content || '' },
+            config: {
+              content: el.config?.content || ''
+            },
             data: null
           });
         }
       }
       
-      // Add table from selected columns
-      if (includeTableData && selectedColumns.length > 0) {
+      const hasTableInReport = localElements.some((e) => e.type === 'table');
+      if (selectedColumns.length > 0 && !hasTableInReport) {
         elements.push({
           type: 'table',
           config: {
-            columns: selectedColumns.map(col => ({ name: col, header: col })),
+            columns: selectedColumns.map((col) => ({ name: col, header: col })),
             rows_per_page: rowsPerPage,
-            show_header: showHeader
+            show_header: showHeader,
           },
-          data: null
+          data: null,
         });
       }
       
@@ -129,13 +185,30 @@ const PaginatedReportModal = ({
         return;
       }
       
+      const totalRows =
+        (dataset && dataset.metadata && dataset.metadata.totalRows) ||
+        (dataset && dataset.rows && dataset.rows.length) ||
+        null;
+
       const requestBody = {
         title: reportName,
         page_size: pageSize,
         orientation: orientation,
         elements: elements,
-        file_id: activeFileId
+        file_id: activeFileId,
+        include_summary: includeSummary,
+        rows_per_page: rowsPerPage,
+        dataset_row_count: totalRows,
+        selected_columns_count: selectedColumns.length,
       };
+      
+      if (activeFileId) {
+        for (const el of elements) {
+          if (el.data == null) {
+            delete el.data;
+          }
+        }
+      }
 
       const pdfResponse = await fetch('/api/reports/generate-pdf-direct', {
         method: 'POST',
@@ -143,7 +216,7 @@ const PaginatedReportModal = ({
         body: JSON.stringify(requestBody)
       });
 
-      console.log('PDF response:', pdfResponse.status);
+      console.log('PDF response status:', pdfResponse.status, 'content-type:', pdfResponse.headers.get('content-type'));
 
       if (pdfResponse.headers.get("content-type") !== "application/pdf") {
         const error = await pdfResponse.json();
@@ -158,10 +231,10 @@ const PaginatedReportModal = ({
       }
 
       const blob = await pdfResponse.blob();
-      console.log('PDF size:', blob.size, 'bytes');
+      console.log('PDF blob size:', blob.size, 'bytes');
       
       if (blob.size < 500) {
-        throw new Error('PDF too small');
+        throw new Error('PDF generated is too small - may be empty or corrupted');
       }
       
       const url = URL.createObjectURL(blob);
@@ -175,22 +248,29 @@ const PaginatedReportModal = ({
 
       onClose();
     } catch (err) {
-      console.error('Error:', err);
-      alert('Error: ' + (err.message || 'Failed'));
+      console.error('Error generating report:', err);
+      alert('Error: ' + (err.message || 'Failed to generate report. Please try again.'));
     } finally {
       setIsGenerating(false);
     }
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="paginated-report-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="paginated-report-modal">
         <div className="paginated-report-header">
-          <h2>
-            <FileText size={20} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
-            Paginated Report
-          </h2>
-          <button className="paginated-report-close" onClick={onClose}>
+          <div className="paginated-report-header-main">
+            <div className="paginated-report-header-icon" aria-hidden>
+              <FileText size={22} strokeWidth={2} />
+            </div>
+            <div className="paginated-report-header-text">
+              <h2>Paginated Report</h2>
+              <p className="paginated-report-header-sub">Export dashboard visuals to a styled PDF</p>
+            </div>
+          </div>
+          <button type="button" className="paginated-report-close" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
@@ -237,18 +317,20 @@ const PaginatedReportModal = ({
             </div>
 
             <div className="paginated-report-field">
-              <label className="paginated-report-label">Rows per Page</label>
-              <select
+              <label className="paginated-report-label">
+                Max rows in this PDF (table + charts + summary)
+              </label>
+              <input
+                type="number"
                 value={rowsPerPage}
-                onChange={(e) => setRowsPerPage(parseInt(e.target.value))}
-                className="paginated-report-select"
-              >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={30}>30</option>
-                <option value={40}>40</option>
-                <option value={50}>50</option>
-              </select>
+                onChange={(e) => setRowsPerPage(parseInt(e.target.value, 10) || 30)}
+                min={1}
+                max={5000}
+                className="paginated-report-input"
+              />
+              <p className="paginated-report-field-hint">
+                The exported table includes at most this many rows (selected columns only). Charts and summary use the same cap so the file stays short.
+              </p>
             </div>
           </div>
 
@@ -256,73 +338,94 @@ const PaginatedReportModal = ({
             <div className="paginated-report-section">
               <h3 className="paginated-report-section-title">Added Visualizations</h3>
               <div className="paginated-report-elements-list">
-                {localElements.map((el, idx) => (
-                  <div key={el.id} className="paginated-report-element-item">
-                    <GripVertical size={14} style={{ color: '#9ca3af', marginRight: '8px' }} />
-                    <span className="element-type">{el.type}</span>
-                    <span className="element-title">{el.title}</span>
-                    <button 
-                      className="element-remove-btn" 
-                      onClick={() => removeElement(el.id)}
-                      title="Remove from report"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                {localElements.map((el) => {
+                  const isChart = CHART_ELEMENT_TYPES.has(el.type);
+                  const pts = getElementPointCount(el);
+                  const spark = isChart ? getSparklinePercents(el) : [];
+                  const xField = el.x_axis || el.config?.x_axis;
+                  const yField = el.y_axis || el.config?.y_axis;
+                  return (
+                    <div key={el.id} className="paginated-report-element-item">
+                      <button type="button" className="paginated-report-element-grip" tabIndex={-1} aria-hidden>
+                        <GripVertical size={16} />
+                      </button>
+                      <div className={`paginated-report-element-icon ${isChart ? 'is-chart' : 'is-table'}`}>
+                        {isChart ? (
+                          el.type === 'step' || el.type === 'line' || el.type === 'area' ? (
+                            <LineChart size={18} />
+                          ) : (
+                            <BarChart size={18} />
+                          )
+                        ) : (
+                          <Table size={18} />
+                        )}
+                      </div>
+                      <div className="paginated-report-element-body">
+                        <div className="paginated-report-element-topline">
+                          <span className="paginated-report-element-chip">{formatElementType(el.type)}</span>
+                          {pts != null && (
+                            <span className="paginated-report-element-count">{pts.toLocaleString()} data points</span>
+                          )}
+                        </div>
+                        <div className="paginated-report-element-title-row">
+                          <span className="paginated-report-element-title">{el.title || 'Untitled'}</span>
+                          <button
+                            type="button"
+                            className="paginated-report-element-remove"
+                            onClick={() => removeElement(el.id)}
+                            title="Remove from report"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                        {isChart && (xField || yField) && (
+                          <div className="paginated-report-element-axes">
+                            {xField && <span>X: {xField}</span>}
+                            {xField && yField && <span className="axes-sep">·</span>}
+                            {yField && <span>Y: {yField}</span>}
+                          </div>
+                        )}
+                        {isChart && spark.length > 0 && (
+                          <div className="paginated-report-element-spark" aria-hidden>
+                            {spark.map((h, i) => (
+                              <span key={i} style={{ height: `${Math.max(12, h)}%` }} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                Added visualizations will be included in the PDF report
+              <p className="paginated-report-elements-hint">
+                These visuals use the same theme as the generated PDF (purple BI styling).
               </p>
             </div>
           )}
 
           <div className="paginated-report-section">
-            <h3 className="paginated-report-section-title">Include in Report</h3>
+            <h3 className="paginated-report-section-title">Options</h3>
             
             <div className="paginated-report-checkbox-group">
-              <label className="paginated-report-checkbox">
-                <input
-                  type="checkbox"
-                  checked={includeCharts}
-                  onChange={(e) => setIncludeCharts(e.target.checked)}
-                />
-                <BarChart size={16} />
-                <span>Charts</span>
-              </label>
-
-              <label className="paginated-report-checkbox">
-                <input
-                  type="checkbox"
-                  checked={includeTableData}
-                  onChange={(e) => setIncludeTableData(e.target.checked)}
-                />
-                <Table size={16} />
-                <span>Table Data</span>
-              </label>
-
-              <label className="paginated-report-checkbox">
+              <label className="paginated-report-checkbox paginated-report-checkbox-featured">
                 <input
                   type="checkbox"
                   checked={includeSummary}
                   onChange={(e) => setIncludeSummary(e.target.checked)}
                 />
-                <span>Summary (KPIs)</span>
+                <span className="paginated-report-checkbox-icon" aria-hidden>
+                  <Table size={16} />
+                </span>
+                <span>Include Summary (totals, averages)</span>
               </label>
-            </div>
-          </div>
 
-          <div className="paginated-report-section">
-            <h3 className="paginated-report-section-title">Page Settings</h3>
-            
-            <div className="paginated-report-checkbox-group">
               <label className="paginated-report-checkbox">
                 <input
                   type="checkbox"
                   checked={showHeader}
                   onChange={(e) => setShowHeader(e.target.checked)}
                 />
-                <span>Repeat Header</span>
+                <span>Show Header on each page</span>
               </label>
 
               <label className="paginated-report-checkbox">
@@ -331,7 +434,7 @@ const PaginatedReportModal = ({
                   checked={showFooter}
                   onChange={(e) => setShowFooter(e.target.checked)}
                 />
-                <span>Page Numbers</span>
+                <span>Show Footer (Page X of Y)</span>
               </label>
             </div>
           </div>
@@ -364,13 +467,15 @@ const PaginatedReportModal = ({
               )}
             </div>
           </div>
-        </div>
 
-        <div className="paginated-report-info">
-          {dataset && dataset.metadata && (
-            <span>Total Rows: {dataset.metadata.totalRows || dataset.rows?.length || 0}</span>
-          )}
-          <span>Selected: {selectedColumns.length} columns</span>
+          <div className="paginated-report-info">
+            {dataset && dataset.metadata && (
+              <span className="paginated-report-info-pill">
+                Total rows: {(dataset.metadata.totalRows || dataset.rows?.length || 0).toLocaleString()}
+              </span>
+            )}
+            <span className="paginated-report-info-pill">Selected: {selectedColumns.length} columns</span>
+          </div>
         </div>
 
         <div className="paginated-report-actions">

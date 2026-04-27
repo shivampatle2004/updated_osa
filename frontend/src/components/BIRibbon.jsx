@@ -34,7 +34,7 @@ const Dropdown = ({ options, onClose, onSelect }) => {
                     <button
                         key={opt.id}
                         className={`bi-dropdown-item ${opt.disabled ? 'disabled' : ''}`}
-                        onClick={() => { if (!opt.disabled) { onSelect(opt.id); onClose(); } }}
+                        onClick={() => { if (!opt.disabled) { onSelect(opt.id, opt); onClose(); } }}
                         title={opt.tooltip || opt.label}
                     >
                         {opt.icon && <span className="bi-dropdown-item-icon">{opt.icon}</span>}
@@ -90,7 +90,8 @@ const BIRibbon = ({
     activeTab, setActiveTab, onAction, fileName, 
     activeMeasure, setActiveMeasure, activeColumn, setActiveColumn, 
     onUpdateColumn, fileId, dataset,
-    dateHierarchy, dateFilter, setDateFilter
+    dateHierarchy, dateFilter, setDateFilter,
+    hideSecurityTools = false,
 }) => {
     let tabs = [
         'File', 'Home', 'Insert', 'Modeling', 'View',
@@ -106,6 +107,9 @@ const BIRibbon = ({
     const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
     const [installModalOpen, setInstallModalOpen] = useState(false);
     const [installModalMode, setInstallModalMode] = useState('appsource');
+    const [recentSourcesOptions, setRecentSourcesOptions] = useState([
+        { id: 'recent_none', label: 'No recent sources', disabled: true },
+    ]);
 
     const toggleDropdown = (name) => setOpenDropdown(prev => prev === name ? null : name);
     const closeDropdown = () => setOpenDropdown(null);
@@ -120,7 +124,12 @@ const BIRibbon = ({
         }
     };
 
-    const act = (id) => { 
+    const act = (id, optionMeta) => { 
+        if (optionMeta?.recentAction) {
+            onAction(optionMeta.recentAction, optionMeta.recentPayload || null);
+            closeDropdown();
+            return;
+        }
         if (id === 'vis_appsource') {
              setInstallModalMode('appsource');
              setInstallModalOpen(true);
@@ -146,9 +155,36 @@ const BIRibbon = ({
         { id: 'more_connectors', icon: <Plus size={16} />, label: 'More...', sub: 'View all data connectors' },
     ];
 
-    const recentSourcesOptions = [
-        { id: 'recent_none', label: 'No recent sources', disabled: true },
-    ];
+    useEffect(() => {
+        const loadRecentSources = () => {
+            try {
+                const raw = localStorage.getItem('osa_recent_sources');
+                const arr = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(arr) || arr.length === 0) {
+                    setRecentSourcesOptions([{ id: 'recent_none', label: 'No recent sources', disabled: true }]);
+                    return;
+                }
+                const opts = arr.slice(0, 8).map((src, idx) => ({
+                    id: `recent_source_${idx}`,
+                    label: src?.label || 'Recent source',
+                    sub: src?.sub || '',
+                    recentAction: src?.actionId || 'get_data',
+                    recentPayload: src?.payload || null,
+                }));
+                setRecentSourcesOptions(opts.length ? opts : [{ id: 'recent_none', label: 'No recent sources', disabled: true }]);
+            } catch (_) {
+                setRecentSourcesOptions([{ id: 'recent_none', label: 'No recent sources', disabled: true }]);
+            }
+        };
+
+        loadRecentSources();
+        window.addEventListener('storage', loadRecentSources);
+        window.addEventListener('osa_recent_sources_updated', loadRecentSources);
+        return () => {
+            window.removeEventListener('storage', loadRecentSources);
+            window.removeEventListener('osa_recent_sources_updated', loadRecentSources);
+        };
+    }, []);
 
     const transformDataOptions = [
         { id: 'transform_data', icon: <FileCode size={16} />, label: 'Transform Data', sub: 'Open Power Query editor' },
@@ -208,9 +244,7 @@ const BIRibbon = ({
     ];
 
     const themesOptions = [
-        { id: 'theme_default', label: 'Power BI' },
-        { id: 'theme_dark', label: 'Dark Mode' },
-        { id: 'theme_high_contrast', label: 'High Contrast' },
+        { id: 'theme_default', label: 'OSA Purple' },
         { id: 'theme_storm', label: 'Storm' },
         { id: 'theme_bloom', label: 'Bloom' },
         { id: 'theme_sunset', label: 'Sunset' },
@@ -233,6 +267,16 @@ const BIRibbon = ({
         { id: 'view_fit_page', label: 'Fit to page' },
         { id: 'view_fit_width', label: 'Fit to width' },
         { id: 'view_actual', label: 'Actual size' },
+    ];
+
+    const pageColorOptions = [
+        { id: 'set_report_bg_white', label: 'White' },
+        { id: 'set_report_bg_soft_gray', label: 'Soft gray' },
+        { id: 'set_report_bg_soft_blue', label: 'Soft blue' },
+        { id: 'set_report_bg_soft_purple', label: 'Soft purple' },
+        { id: 'set_report_bg_soft_cream', label: 'Soft cream' },
+        null,
+        { id: 'set_report_background', icon: <Palette size={16} />, label: 'More colors (hex code)' },
     ];
 
     // const sensitivityOptions = [
@@ -586,7 +630,8 @@ const BIRibbon = ({
                 />
             </Group>
 
-            {/* ── Security ── */}
+            {/* ── Security (hidden for consumers opening a locked publish link) ── */}
+            {!hideSecurityTools && (
             <Group label="Security">
                 <RibbonBtn
                     icon={<Lock size={32} />}
@@ -601,6 +646,7 @@ const BIRibbon = ({
                     tooltip="Test your report as different security roles"
                 />
             </Group>
+            )}
 
             {/* ── Time Slicer (Added) ── */}
             {dateHierarchy && (
@@ -647,9 +693,7 @@ const BIRibbon = ({
 
     const renderViewToolbar = () => {
         const themes = [
-            { id: 'theme_default', name: 'Power BI', color: '#f2c811' },
-            { id: 'theme_high_contrast', name: 'High Contrast', color: '#000000' },
-            { id: 'theme_dark', name: 'Dark Mode', color: '#1a1a1a' },
+            { id: 'theme_default', name: 'OSA Purple', color: '#744EC2' },
             { id: 'theme_storm', name: 'Storm', color: '#4a90e2' },
             { id: 'theme_bloom', name: 'Bloom', color: '#50e3c2' },
             { id: 'theme_financial', name: 'Financial', color: '#2D2D3A' },
@@ -720,6 +764,17 @@ const BIRibbon = ({
                 <Group label="Page options">
                     <div className="bi-tool-column">
                         <SmallBtn icon={<Type size={12} />} label="Report header" onClick={() => act('set_report_header')} tooltip="Set a report-level heading shown on the canvas" />
+                        <div className="bi-dropdown-wrapper">
+                            <SmallBtn
+                                icon={<Palette size={12} />}
+                                label="Page color"
+                                onClick={() => toggleDropdown('page_color')}
+                                tooltip="Set report canvas background color"
+                            />
+                            {openDropdown === 'page_color' && (
+                                <Dropdown options={pageColorOptions} onClose={closeDropdown} onSelect={act} />
+                            )}
+                        </div>
                         {/* <SmallBtn icon={null} label="Gridlines" onClick={() => act('toggle_gridlines')} tooltip="Show or hide alignment gridlines" />
                         <SmallBtn icon={null} label="Snap to grid" onClick={() => act('toggle_snap')} tooltip="Align visuals to grid automatically" /> */}
                         <SmallBtn icon={<Lock size={12} />} label="Lock objects" onClick={() => act('toggle_lock')} tooltip="Prevent visuals from being moved or resized" />

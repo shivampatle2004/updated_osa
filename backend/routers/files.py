@@ -9,7 +9,9 @@ from database import SessionLocal
 from models import UploadedFile, FileColumn, ColumnStatistic, User, GraphDefinition
 import models
 from services.data_processor import DataProcessor
-from tasks import run_file_processing
+from services.upload_limits import save_upload_file, MAX_UPLOAD_BYTES
+from tasks import run_file_processing, get_processing_status
+import services.worksheet_service as ws_svc
 import uuid
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -103,6 +105,40 @@ def dataset_missing_payload(file_record: UploadedFile, limit: int, offset: int, 
     }
 
 
+def _serve_from_worksheet(worksheet_id: str, db, limit: int, offset: int,
+                          file_record: UploadedFile = None,
+                          filters=None, sort_by=None, sort_order="asc"):
+    """
+    Serve dataset payload from the persistent worksheet_data table.
+    Returns the same {columns, rows, metadata} shape the frontend expects.
+    """
+    from services.query_service import get_worksheet_data
+    result = get_worksheet_data(
+        db=db,
+        worksheet_id=worksheet_id,
+        offset=offset,
+        limit=limit,
+        filters=filters,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    columns = [{"name": c["name"], "type": c.get("type", "unknown")} for c in result["columns"]]
+    return {
+        "columns": columns,
+        "rows": result["rows"],
+        "metadata": {
+            "fileId": file_record.id if file_record else worksheet_id,
+            "fileName": file_record.file_name if file_record else result.get("worksheet_name", ""),
+            "status": "completed",
+            "totalRows": result["pagination"]["total"],
+            "returnedRows": len(result["rows"]),
+            "offset": offset,
+            "limit": limit,
+            "datasetSource": "worksheet_db",
+        },
+    }
+
+
 
 @router.post("/upload")
 async def upload_file(
@@ -130,9 +166,8 @@ async def upload_file(
     file_id = uuid.uuid4()
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}.{extension}")
 
-    # Save file
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # Stream upload to disk. MAX_UPLOAD_BYTES=0 means no app-level size cap.
+    save_upload_file(file, file_path)
 
     # Basic content validation for common mismatches (e.g. HTML downloaded as .xlsx)
     try:
@@ -184,6 +219,10 @@ async def upload_file(
         "file_id": str(file_id),
         "status": "pending",
         "message": "File upload successful, processing started",
+        "upload_policy": {
+            "max_upload_bytes": MAX_UPLOAD_BYTES,
+            "app_level_limit_enabled": bool(MAX_UPLOAD_BYTES),
+        },
         # Basename only — CSV/Excel/JSON connectors resolve under backend/uploads/
         "connector_file_path": f"{file_id}.{extension}",
     }
@@ -256,6 +295,19 @@ def get_file_dataset(
     file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
+
+    # ── PRIMARY: serve from persistent worksheet_data (database-first) ─────────
+    try:
+        ws = ws_svc.get_worksheet_for_file(db, file_id)
+        if ws and ws.status == "ready":
+            print(
+                f"get_file_dataset: serving {file_id} from worksheet_data "
+                f"(worksheet_id={ws.id}, limit={limit}, offset={offset})"
+            )
+            return _serve_from_worksheet(ws.id, db, limit, offset, file_record)
+    except Exception as _ws_err:
+        print(f"get_file_dataset: worksheet fallback error for {file_id}: {_ws_err}")
+    # ─────────────────────────────────────────────────────────────────────
 
     from services.sql_profile_helpers import attach_sql_profile_if_missing
 
@@ -791,10 +843,36 @@ def get_file_status(file_id: str, db: Session = Depends(get_db)):
                 row_count = int(len(df))
         except Exception as exc:
             print(f"get_file_status: effective row count failed: {exc}")
+    ws = ws_svc.get_worksheet_for_file(db, file_id)
+    processing = get_processing_status(file_id)
+    stage = processing.get("stage")
+    progress = processing.get("progress")
+    message = processing.get("message")
+    if not message:
+        default_messages = {
+            "pending": "Queued for background processing...",
+            "processing": "Processing uploaded data...",
+            "completed": "Upload completed successfully.",
+            "failed": file_record.error_message or "Upload processing failed.",
+        }
+        message = default_messages.get(file_record.status, "Processing...")
+    if progress is None:
+        default_progress = {
+            "pending": 10,
+            "processing": 50,
+            "completed": 100,
+            "failed": 100,
+        }
+        progress = default_progress.get(file_record.status, 0)
     return {
         "status": file_record.status,
+        "stage": stage or file_record.status,
+        "progress": progress,
+        "message": message,
         "error": file_record.error_message,
         "row_count": row_count,
+        "worksheet_persisted": bool(ws and ws.status == "ready"),
+        "worksheet_id": ws.id if ws else None,
         "fileName": file_record.file_name,
         "created_at": file_record.created_at.strftime("%Y-%m-%d %H:%M") if file_record.created_at else None,
     }
@@ -1071,6 +1149,112 @@ def update_file_model(
     return {"message": "Model configuration saved successfully"}
 
 
+@router.post("/{file_id}/model/add-table")
+def add_table_to_model(
+    file_id: str,
+    body: dict = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
+):
+    """
+    Add an already-uploaded file as an additional table in this workspace's model.
+    Body: { "table_file_id": "<uuid>", "table_name": "<display name>" }
+    The new table is appended to model_config.tables without touching existing
+    tables, relationships, or SQL dataset config.
+    Charts that use columns from this table (prefixed "TableName - col") will
+    automatically work because ModelEngine.load_report_dataframe() reads
+    model_config.tables to build the merged dataframe.
+    """
+    # Validate workspace (base report)
+    base_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not base_record:
+        raise HTTPException(status_code=404, detail="Workspace file not found")
+
+    # Validate the table file being added
+    table_file_id = (body.get("table_file_id") or "").strip()
+    if not table_file_id:
+        raise HTTPException(status_code=400, detail="table_file_id is required")
+
+    table_record = db.query(UploadedFile).filter(UploadedFile.id == table_file_id).first()
+    if not table_record:
+        raise HTTPException(status_code=404, detail=f"Table file {table_file_id} not found")
+
+    # Derive display name
+    raw_name = (body.get("table_name") or "").strip()
+    if not raw_name and table_record.file_name:
+        raw_name = table_record.file_name.rsplit(".", 1)[0]
+    if not raw_name:
+        raw_name = f"Table_{table_file_id[:8]}"
+
+    # Ensure newly added table data is persisted in worksheet_data (PostgreSQL-first),
+    # regardless of whether the source is file upload or external SQL.
+    try:
+        ws_existing = ws_svc.get_worksheet_for_file(db, table_file_id)
+        if not (ws_existing and ws_existing.status == "ready"):
+            provisional_meta = {"id": table_file_id, "name": raw_name}
+            if table_record.file_path and str(table_record.file_path).startswith("sql://"):
+                parts = str(table_record.file_path)[6:].split("/")
+                if len(parts) >= 2:
+                    provisional_meta["source"] = {
+                        "connection_id": parts[0],
+                        "table_name": "/".join(parts[1:]),
+                    }
+            from services.model_data_loader import load_table_dataframe
+            table_df = load_table_dataframe(provisional_meta, db)
+            if table_df is not None and not table_df.empty:
+                ws = ws_existing or ws_svc.create_worksheet(
+                    db=db,
+                    name=raw_name,
+                    owner_id=table_record.user_id,
+                    source_type="file_upload",
+                    source_id=table_file_id,
+                )
+                ws_svc.import_data_from_dataframe(table_df, ws.id, db=db)
+    except Exception as ws_err:
+        print(f"add_table_to_model: worksheet persistence warning for {table_file_id}: {ws_err}")
+
+    # Read and update model_config
+    mc = dict(base_record.model_config or {})
+    tables = list(mc.get("tables", []))
+
+    # Avoid duplicates — if the table_file_id is already in the list, update the name only
+    existing_entry = next((t for t in tables if t.get("id") == table_file_id), None)
+    if existing_entry:
+        existing_entry["name"] = raw_name
+    else:
+        # Build the column list from FileColumn rows (already processed by background task)
+        col_rows = db.query(FileColumn).filter(FileColumn.file_id == table_file_id).all()
+        col_list = [{"name": c.column_name, "type": c.data_type} for c in col_rows]
+
+        tables.append({
+            "id": table_file_id,
+            "name": raw_name,
+            "columns": col_list,
+            "source": "upload",
+        })
+
+    mc["tables"] = tables
+    base_record.model_config = mc
+    db.commit()
+
+    # Invalidate ModelEngine cache so charts pick up the new table immediately
+    try:
+        from services.model_engine import ModelEngine
+        with ModelEngine._model_df_cache_lock:
+            keys_to_drop = [k for k in ModelEngine._model_df_cache if file_id in k]
+            for k in keys_to_drop:
+                ModelEngine._model_df_cache.pop(k, None)
+    except Exception as cache_err:
+        print(f"add_table_to_model: cache clear warning: {cache_err}")
+
+    return {
+        "success": True,
+        "table_file_id": table_file_id,
+        "table_name": raw_name,
+        "tables": mc["tables"],
+    }
+
+
 @router.post("/{file_id}/model/build-query")
 def build_model_aggregate_query(
     file_id: str,
@@ -1235,3 +1419,64 @@ def delete_sql_dataset_entry(file_id: str, dataset_id: str, db: Session = Depend
     file_record.model_config = mc
     db.commit()
     return {"success": True, "sql_datasets": mc.get("sql_datasets") or [], "sql_dataset": mc.get("sql_dataset")}
+
+
+# ─── CACHE MANAGEMENT ENDPOINTS ───────────────────────────────────────────────
+
+@router.get("/{file_id}/cache-clear")
+def clear_file_cache(file_id: str, db: Session = Depends(get_db)):
+    """🔍 Clear DataFrame cache for a specific file to force fresh read from disk."""
+    file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_path = resolve_stored_file_path(file_record)
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File path could not be resolved")
+    
+    result = DataProcessor.clear_cache_for_file(file_path)
+    return {
+        "status": "cleared",
+        "file_id": file_id,
+        "file_path": file_path,
+        "result": result,
+        "info": "Cache cleared. Next read will be from disk."
+    }
+
+@router.post("/cache-clear-all")
+def clear_all_cache():
+    """🔍 Clear all cached DataFrames to force fresh reads for all files."""
+    result = DataProcessor.clear_cache()
+    return {
+        "status": "cleared",
+        "result": result,
+        "info": "All caches cleared. Next reads will be from disk."
+    }
+
+
+@router.get("/{file_id}/model/diagnostics")
+def get_model_diagnostics(file_id: str, db: Session = Depends(get_db)):
+    """
+    Show per-table source diagnostics for a workspace model:
+    - served_by: worksheet_data | fallback_source
+    - model_df_cache: whether merged dataframe is in memory cache
+    """
+    file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    from services.model_engine import ModelEngine
+
+    table_sources = ModelEngine.inspect_model_table_sources(file_id, db)
+    cache_status = ModelEngine.get_model_cache_status(file_id, db)
+    all_tables_pg_backed = bool(table_sources) and all(
+        t.get("served_by") == "worksheet_data" for t in table_sources
+    )
+
+    return {
+        "file_id": file_id,
+        "file_name": file_record.file_name,
+        "model_df_cache": cache_status,
+        "all_tables_pg_backed": all_tables_pg_backed,
+        "table_sources": table_sources,
+    }

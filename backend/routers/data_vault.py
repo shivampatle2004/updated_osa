@@ -92,14 +92,44 @@ def preview_vault_item(
 ):
     """
     Return up to `limit` rows from the dataset stored in DataVault.
-    For file-based datasets, reads from the uploaded file on disk.
-    For table-based datasets, reads from the local analytics DB.
+    Checks persistent worksheet_data first, falls back to file/table on disk.
     """
     item = db.query(DataVaultItem).filter(DataVaultItem.id == vault_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="DataVault entry not found")
 
-    # ── File-based dataset ────────────────────────────────────────────────────
+    # ── Worksheet-based read (persistent, DB-first for ALL dataset types) ──────
+    meta = item.metadata_json or {}
+    worksheet_id = meta.get("worksheet_id")
+
+    # For file-based items: look up worksheet via file_id linkage
+    if not worksheet_id and item.file_id:
+        from services.worksheet_service import get_worksheet_for_file
+        from models import Worksheet
+        ws = get_worksheet_for_file(db, item.file_id)
+        if ws and ws.status == "ready":
+            worksheet_id = ws.id
+
+    if worksheet_id:
+        try:
+            from services.query_service import get_worksheet_data
+            result = get_worksheet_data(db, worksheet_id, offset=0, limit=limit)
+            rows = result["rows"]
+            columns = [{"name": c["name"], "type": c.get("type", "unknown")} for c in result["columns"]]
+            return {
+                "vault_id": vault_id,
+                "name": item.name,
+                "source_name": item.source_name,
+                "columns": columns,
+                "rows": rows,
+                "total_rows": result["pagination"]["total"],
+                "returned_rows": len(rows),
+                "data_source": "worksheet_db",
+            }
+        except Exception as ws_err:
+            print(f"[DataVault] Worksheet read failed for {vault_id}: {ws_err}. Falling back.")
+
+    # ── File-based fallback ────────────────────────────────────────────────────
     if item.dataset_type == "file" and item.file_id:
         file_record = db.query(UploadedFile).filter(
             UploadedFile.id == item.file_id
@@ -110,7 +140,6 @@ def preview_vault_item(
                 detail="Original file record no longer exists"
             )
 
-        # Resolve the stored file path (mirrors files.py logic)
         _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         _upload_abs = os.path.join(_backend_dir, "uploads")
 
@@ -163,7 +192,7 @@ def preview_vault_item(
             "returned_rows": len(rows),
         }
 
-    # ── Table-based dataset ───────────────────────────────────────────────────
+    # ── Table-based fallback ───────────────────────────────────────────────────
     if item.dataset_type == "table" and item.table_name:
         try:
             from database import engine as local_engine
@@ -193,6 +222,7 @@ def preview_vault_item(
         status_code=400,
         detail="Cannot preview this DataVault entry — no associated file or table."
     )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

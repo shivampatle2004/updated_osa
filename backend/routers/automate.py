@@ -122,6 +122,7 @@ async def generate_report(action_id: str, workflow_id: str, db: Session):
             db.commit()
 
         logger.info(f"[{action_id}] ✅ generate_report — PDF saved at {pdf_path}")
+        return True
 
     except Exception as err:
         # PDF generation failed — log it but don't crash the whole pipeline
@@ -129,6 +130,10 @@ async def generate_report(action_id: str, workflow_id: str, db: Session):
         if action:
             action.last_status = "failed"
             db.commit()
+        if workflow:
+            workflow.status = "failed"
+            db.commit()
+        return False
 
 
 # ── Action registry ─────────────────────────────────────────────────────────────
@@ -161,10 +166,14 @@ async def execute_pipeline(workflow_id: str, db: Session):
     db.commit()
 
     try:
+        pipeline_failed = False
         for action in workflow.actions:
             if action.action_type == "generate_report":
                 # generate_report needs the workflow_id to store the PDF path
-                await generate_report(action.id, workflow_id, db)
+                ok = await generate_report(action.id, workflow_id, db)
+                if not ok:
+                    pipeline_failed = True
+                    break
             else:
                 handler = SIMPLE_ACTION_HANDLERS.get(action.action_type)
                 if handler:
@@ -174,10 +183,13 @@ async def execute_pipeline(workflow_id: str, db: Session):
                         f"[Workflow:{workflow_id}] ⚠️ Unknown action: {action.action_type}"
                     )
 
-        workflow.status = "success"
+        workflow.status = "failed" if pipeline_failed else "success"
         workflow.last_run_at = datetime.datetime.utcnow()
         db.commit()
-        logger.info(f"[Workflow:{workflow_id}] 🎉 Pipeline completed successfully.")
+        if pipeline_failed:
+            logger.error(f"[Workflow:{workflow_id}] ❌ Pipeline completed with failures.")
+        else:
+            logger.info(f"[Workflow:{workflow_id}] 🎉 Pipeline completed successfully.")
 
     except Exception as err:
         logger.error(f"[Workflow:{workflow_id}] ❌ Pipeline failed: {err}")

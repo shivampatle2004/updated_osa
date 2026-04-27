@@ -36,20 +36,65 @@ const PaginatedReportBuilder = ({ userId }) => {
   // Fetch report if ID exists
   useEffect(() => {
     if (reportId) {
+      console.log('🔍 [Report Load] Fetching report:', reportId);
       fetch(`/api/reports/${reportId}`)
-        .then(res => res.json())
+        .then(res => {
+          console.log('🔍 [Report Load] Response status:', res.status);
+          return res.json();
+        })
         .then(data => {
+          console.log('🔍 [Report Load] Received report data:', {
+            id: data.id,
+            name: data.name,
+            pages: data.layout_json?.pages?.length,
+            hasElements: data.layout_json?.pages?.some(p => p.elements?.length > 0),
+            chartsWithData: data.layout_json?.pages?.flatMap(p => p.elements || []).filter(e => e.type === 'chart' && e.config?.chart_data).length
+          });
+          
           if (data) {
+            const layoutPages = data.layout_json.pages || [];
             setReport({
               name: data.name,
-              pages: data.layout_json.pages || [],
+              pages: layoutPages,
               parameters: data.parameters || []
             });
-            // Trigger initial data load
-            Object.keys(data.datasource_mapping || {}).forEach(elId => {
-              refreshElementData(reportId, elId, data.datasource_mapping[elId]);
+            
+            // Load inline data from config
+            const initialElementData = {};
+            let chartDataLoadCount = 0;
+            layoutPages.forEach(page => {
+              page.elements.forEach(el => {
+                if (el.type === 'chart' && el.config.chart_data) {
+                  console.log(`✅ [Report Load] Chart "${el.config.title || el.id}" has inline data:`, {
+                    rows: el.config.chart_data.length,
+                    sizeKB: JSON.stringify(el.config.chart_data).length / 1024
+                  });
+                  initialElementData[el.id] = { rows: el.config.chart_data };
+                  chartDataLoadCount++;
+                } else if (el.type === 'chart') {
+                  console.log(`⚠️ [Report Load] Chart "${el.config.title || el.id}" has NO inline data (vault_id: ${el.config.vault_id || 'none'})`);
+                }
+              });
+            });
+            console.log(`📊 [Report Load] Loaded ${chartDataLoadCount} charts with inline data`);
+            setElementData(initialElementData);
+            
+            // Trigger initial data load for elements with vault_id
+            const vaultElements = Object.keys(data.datasource_mapping || {});
+            console.log(`🔗 [Report Load] Found ${vaultElements.length} elements with vault mappings`);
+            vaultElements.forEach(elId => {
+              const el = layoutPages.flatMap(p => p.elements).find(e => e.id === elId);
+              if (el && !el.config.chart_data) {
+                console.log(`🔄 [Report Load] Fetching vault data for element: ${elId}`);
+                refreshElementData(reportId, elId, data.datasource_mapping[elId]);
+              } else if (el && el.config.chart_data) {
+                console.log(`⏭️ [Report Load] Skipping vault fetch - inline data exists for: ${elId}`);
+              }
             });
           }
+        })
+        .catch(err => {
+          console.error('❌ [Report Load] Error fetching report:', err);
         });
     }
   }, [reportId]);
@@ -66,6 +111,10 @@ const PaginatedReportBuilder = ({ userId }) => {
 
   // Sync datasource mapping to backend and fetch data
   const refreshElementData = useCallback(async (reportIdToFetch, elementId, config) => {
+    // Skip if inline data exists
+    const el = report.pages.flatMap(p => p.elements).find(e => e.id === elementId);
+    if (el && el.config.chart_data) return;
+    
     if (!config.vault_id) return;
     
     try {
@@ -86,7 +135,7 @@ const PaginatedReportBuilder = ({ userId }) => {
     } catch (err) {
       console.error("Error rendering element data:", err);
     }
-  }, []);
+  }, [report.pages]);
 
   // Add a new element to the current page
   const addElement = (type) => {
@@ -121,28 +170,21 @@ const PaginatedReportBuilder = ({ userId }) => {
       return <div className="report-text-content">{el.config.text || 'Double click to edit text'}</div>;
     }
 
-    if (!el.config.vault_id) return getPlaceholderContent(el.type);
-    if (!data) return <div className="loading-spinner">Loading data...</div>;
-    if (data.error) return <div className="error-box">Error: {data.error}</div>;
-
-    if (el.type === 'table') {
-      return (
-        <PaginatedTable 
-          columns={data.columns}
-          rows={data.rows}
-          rowsPerPage={20}
-          config={el.config}
-        />
-      );
-    }
-
     if (el.type === 'chart') {
       const chartType = el.config.chart_type || 'bar';
-      const chartData = data.rows || [];
-      const columns = data.columns || [];
+      const chartData = el.config.chart_data || data?.rows || [];
+      const columns = el.config.chart_data ? [] : data?.columns || []; // For inline data, columns not needed
       
-      const stringCol = columns.find(c => c.type && (c.type.includes('String') || c.type.includes('Utf8')))?.name || columns[0]?.name;
-      const numCol = columns.find(c => c.type && (c.type.includes('Int') || c.type.includes('Float') || c.type.includes('numeric')))?.name || columns[1]?.name || columns[0]?.name;
+      if (!chartData || chartData.length === 0) {
+        if (el.config.vault_id && !el.config.chart_data) {
+          return <div className="loading-spinner">Loading data...</div>;
+        } else {
+          return getPlaceholderContent(el.type);
+        }
+      }
+      
+      const stringCol = el.config.xField || columns.find(c => c.type && (c.type.includes('String') || c.type.includes('Utf8')))?.name || columns[0]?.name || 'name';
+      const numCol = el.config.yField || columns.find(c => c.type && (c.type.includes('Int') || c.type.includes('Float') || c.type.includes('numeric')))?.name || columns[1]?.name || columns[0]?.name || 'value';
       
       const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -191,6 +233,21 @@ const PaginatedReportBuilder = ({ userId }) => {
       );
     }
 
+    if (!el.config.vault_id) return getPlaceholderContent(el.type);
+    if (!data) return <div className="loading-spinner">Loading data...</div>;
+    if (data.error) return <div className="error-box">Error: {data.error}</div>;
+
+    if (el.type === 'table') {
+      return (
+        <PaginatedTable 
+          columns={data.columns}
+          rows={data.rows}
+          rowsPerPage={20}
+          config={el.config}
+        />
+      );
+    }
+
     return getPlaceholderContent(el.type);
   };
 
@@ -235,17 +292,68 @@ const PaginatedReportBuilder = ({ userId }) => {
 
   const handleSave = async () => {
     setIsSaving(true);
-    const layout = { pages: report.pages };
+    console.log('💾 [Report Save] Starting save...', { reportId, isUpdate: !!reportId });
+    
+    // Save current data with elements
+    let chartsEmbedded = 0;
+    let chartsSkipped = 0;
+    const layout = {
+      pages: report.pages.map(page => ({
+        ...page,
+        elements: page.elements.map(el => {
+          if (el.type === 'chart' && elementData[el.id] && !el.config.chart_data) {
+            const dataSize = elementData[el.id].rows.length;
+            console.log(`📊 [Report Save] Embedding chart data: "${el.config.title || el.id}" with ${dataSize} rows`);
+            chartsEmbedded++;
+            return {
+              ...el,
+              config: {
+                ...el.config,
+                chart_data: elementData[el.id].rows
+              }
+            };
+          }
+          if (el.type === 'chart' && el.config.chart_data) {
+            console.log(`✓ [Report Save] Chart already has data: "${el.config.title || el.id}" with ${el.config.chart_data.length} rows`);
+            chartsSkipped++;
+          }
+          return el;
+        })
+      }))
+    };
+    
     const datasource_mapping = {};
-    report.pages.forEach(p => {
+    let vaultMappings = 0;
+    layout.pages.forEach(p => {
       p.elements.forEach(el => {
-        if (el.config.vault_id) datasource_mapping[el.id] = el.config;
+        if (el.config.vault_id) {
+          datasource_mapping[el.id] = el.config;
+          vaultMappings++;
+        }
       });
+    });
+    
+    const payloadSize = JSON.stringify({
+      name: report.name,
+      layout: layout,
+      datasource_mapping: datasource_mapping,
+      user_id: userId
+    }).length / 1024;
+    
+    console.log('💾 [Report Save] Prepared payload:', {
+      chartsEmbedded,
+      chartsAlreadyHavingData: chartsSkipped,
+      vaultMappings,
+      payloadSizeKB: payloadSize.toFixed(2)
     });
 
     try {
-      const res = await fetch('/api/reports' + (reportId ? `/${reportId}` : ''), {
-        method: reportId ? 'PUT' : 'POST',
+      const endpoint = '/api/reports' + (reportId ? `/${reportId}` : '');
+      const method = reportId ? 'PUT' : 'POST';
+      console.log(`💾 [Report Save] Sending ${method} to ${endpoint}`);
+      
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: report.name,
@@ -254,11 +362,21 @@ const PaginatedReportBuilder = ({ userId }) => {
           user_id: userId
         })
       });
+      
+      console.log(`💾 [Report Save] Response status: ${res.status}`);
       const data = await res.json();
-      if (data.id) setReportId(data.id);
-      alert("Report saved successfully!");
+      
+      if (!res.ok) {
+        console.error('❌ [Report Save] API returned error:', data);
+        alert(`❌ Save failed: ${data.detail || 'Unknown error'}`);
+      } else {
+        console.log('✅ [Report Save] Success! Report ID:', data.id);
+        if (data.id) setReportId(data.id);
+        alert("✅ Report saved successfully!");
+      }
     } catch (err) {
-      console.error("Save failed:", err);
+      console.error("❌ [Report Save] Network/parsing error:", err);
+      alert(`❌ Save failed: ${err.message}`);
     } finally {
       setIsSaving(false);
     }

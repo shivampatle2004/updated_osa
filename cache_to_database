@@ -1,0 +1,69 @@
+Plan: PostgreSQL Data Architecture Redesign
+TL;DR: Redesign the backend to store all extracted data in PostgreSQL instead of memory, enabling persistent data (survives refresh), scalability (10M+ rows), multi-user access with permissions, and efficient pagination.
+Implementation Steps
+Phase 1: Database Schema & Migrations (Week 1)
+Add 6 new models to backend/models.py:
+Worksheet — metadata (name, owner, sharing settings)
+WorksheetColumn — column schema + statistics (null counts, min/max)
+WorksheetData — actual data rows stored as JSON
+WorksheetPermission — access control (who can view/edit)
+DataImportQueue — progress tracking for large uploads
+WorksheetTransformation — staging area for transformations
+Create Alembic migration and run alembic upgrade head
+Verifiable: psql shows 6 new tables with proper indexes
+Phase 2: Data Import Service (Week 1-2)
+Create backend/services/worksheet_service.py:
+import_data_from_file(file_path, worksheet_id) — reads CSV in 10K-row chunks
+calculate_column_statistics(worksheet_id) — null/unique/min/max
+update_import_progress(worksheet_id, rows_processed)
+Modify backend/routers/files.py:
+File upload now calls worksheet_service → stores in DB instead of memory
+Verifiable: Upload CSV → check worksheet_data table has rows
+Phase 3: Query Service with Pagination (Week 2)
+Create backend/services/query_service.py:
+get_worksheet_data(worksheet_id, user_id, offset=0, limit=100) — paginated rows
+filter_data(worksheet_id, user_id, filters) — WHERE clauses from UI
+sort_data(worksheet_id, user_id, sort_by, order) — ORDER BY
+aggregate_data(worksheet_id, user_id, group_by, agg_type) — SUM, COUNT, AVG
+Implement permission checks:
+Query WorksheetPermission before returning data
+Return 403 if user not authorized
+Support filter operators: =, !=, >, <, >=, <=, CONTAINS, IN
+Phase 4: API Endpoints (Week 2)
+Create backend/routers/worksheets.py:
+GET    /worksheets              → list user's worksheets
+GET    /worksheets/{id}/data    → paginated data (with filters, sorting)
+POST   /worksheets/{id}/share   → add user permission
+DELETE /worksheets/{id}/permissions/{perm_id} → revoke access
+GET    /worksheets/{id}/export  → download CSV
+Update backend/routers/reports.py:
+refreshElementData() queries /worksheets/{id}/data instead of cache
+Phase 5: Frontend Integration (Week 2-3)
+Update frontend/src/pages/PaginatedReportBuilder.jsx:
+Query new /worksheets/{id}/data endpoint with pagination params
+Support infinite scroll / pagination controls for 10K+ rows
+Add share/permission UI to select users and permission levels
+Phase 6: Connector Integration (Week 3)
+Update all connectors (backend/connectors/):
+Instead of returning DataFrame → call worksheet_service.import_data_from_dataframe(df)
+Store results in Worksheet instead of memory
+Track progress for large datasets (100K+ rows)
+Phase 7: Migration & Cleanup (Week 3-4)
+Migrate existing UploadedFile data to new Worksheet schema
+Keep old UploadedFile as archive (linked via foreign key)
+Update existing reports to reference new Worksheet IDs
+Performance tuning: add indexes, ANALYZE tables, test with 1M+ rows
+Performance Expectations
+Dataset Size	Query Time (with pagination)
+1K rows	< 10ms
+10K rows	10-50ms
+100K rows	50-200ms
+1M rows	200-500ms
+10M rows	500ms-2s
+ 
+ 
+Key Architecture Decisions
+Why JSON for data storage? Flexible (any column type), efficient JSONB indexing, no schema changes for new columns
+Why separate tables? Worksheet metadata separate from actual rows → scalability + archival capability
+Why WorksheetPermission? User/org-wide access control + audit trail of who granted access
+Why DataImportQueue? Progress tracking for large uploads + failure recovery
