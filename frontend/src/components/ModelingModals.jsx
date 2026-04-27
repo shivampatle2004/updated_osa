@@ -68,15 +68,22 @@ export const MarkDateTableModal = ({ isOpen, onClose, schema, fileId, modelTable
     };
 
     return (
-        <div className="osa-modal-overlay">
-            <div className="osa-modal-content modeling-modal">
+        <div className="modeling-overlay" onClick={onClose} role="presentation">
+            <div
+                className="osa-modal-content modeling-modal modeling-modal--date"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-labelledby="mark-date-table-title"
+            >
                 <div className="osa-modal-header">
                     <div className="osa-modal-title">
-                        <Calendar size={20} className="modal-icon" />
-                        <h2>Mark as Date Table</h2>
+                        <div className="modeling-modal-icon-wrap" aria-hidden>
+                            <Calendar size={20} strokeWidth={2.2} />
+                        </div>
+                        <h2 id="mark-date-table-title">Mark as Date Table</h2>
                     </div>
-                    <button className="icon-btn" onClick={onClose} aria-label="Close">
-                        <X size={20} />
+                    <button type="button" className="modeling-modal-close" onClick={onClose} aria-label="Close">
+                        <X size={18} />
                     </button>
                 </div>
                 
@@ -133,12 +140,13 @@ export const MarkDateTableModal = ({ isOpen, onClose, schema, fileId, modelTable
                 </div>
                 
                 <div className="osa-modal-footer">
-                    <button className="btn btn-secondary" onClick={onClose} disabled={isLoading}>
+                    <button type="button" className="btn btn-secondary" onClick={onClose} disabled={isLoading}>
                         Cancel
                     </button>
-                    <button 
-                        className="btn btn-primary" 
-                        onClick={handleSubmit} 
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleSubmit}
                         disabled={isLoading || !selectedColumn || !!success}
                     >
                         {isLoading ? <><RefreshCw className="spin" size={16} /> Validating...</> : 'Mark as Date Table'}
@@ -242,15 +250,22 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
     };
 
     return (
-        <div className="osa-modal-overlay">
-            <div className="osa-modal-content modeling-modal">
+        <div className="modeling-overlay" onClick={onClose} role="presentation">
+            <div
+                className="osa-modal-content modeling-modal modeling-modal--change"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-labelledby="change-detection-title"
+            >
                 <div className="osa-modal-header">
                     <div className="osa-modal-title">
-                        <Activity size={20} className="modal-icon text-accent" />
-                        <h2>Change Detection</h2>
+                        <div className="modeling-modal-icon-wrap modeling-modal-icon-wrap--pulse" aria-hidden>
+                            <Activity size={20} strokeWidth={2.2} />
+                        </div>
+                        <h2 id="change-detection-title">Change Detection</h2>
                     </div>
-                    <button className="icon-btn" onClick={onClose} aria-label="Close">
-                        <X size={20} />
+                    <button type="button" className="modeling-modal-close" onClick={onClose} aria-label="Close">
+                        <X size={18} />
                     </button>
                 </div>
                 
@@ -265,7 +280,12 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
                             <span>
                                 Currently tracking: <strong>{existingStatus.column_name}</strong> 
                                 <br />
-                                <small>Status: <span style={{fontWeight: 'bold', color: existingStatus.status === 'Changed' ? '#f59e0b' : 'inherit'}}>{existingStatus.status}</span> (Checked {new Date(existingStatus.last_checked).toLocaleTimeString()})</small>
+                                <small>Status:{' '}
+                                    <span className={existingStatus.status === 'Changed' ? 'modeling-status-changed' : 'modeling-status-ok'}>
+                                        {existingStatus.status}
+                                    </span>
+                                    {' '}(Checked {new Date(existingStatus.last_checked).toLocaleTimeString()})
+                                </small>
                             </span>
                         </div>
                     )}
@@ -320,12 +340,13 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
                 </div>
                 
                 <div className="osa-modal-footer">
-                    <button className="btn btn-secondary" onClick={onClose} disabled={isLoading}>
+                    <button type="button" className="btn btn-secondary" onClick={onClose} disabled={isLoading}>
                         Close
                     </button>
-                    <button 
-                        className="btn btn-primary" 
-                        onClick={handleSubmit} 
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleSubmit}
                         disabled={isLoading || !selectedColumn || !!success}
                     >
                         {isLoading ? <><RefreshCw className="spin" size={16} /> Setting up...</> : (existingStatus ? 'Update Tracker' : 'Start Tracking')}

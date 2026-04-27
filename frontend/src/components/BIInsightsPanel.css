@@ -57,7 +57,7 @@
 }
 
 .bi-summary-icon {
-    color: #3b82f6;
+    color: #744ec2;
 }
 
 .bi-summary-info {
@@ -111,8 +111,8 @@
 }
 
 .bi-highlight-card:hover {
-    border-color: #3b82f6;
-    background-color: #f0f7ff;
+    border-color: #744ec2;
+    background-color: #f5f0ff;
     transform: translateX(4px);
 }
 
@@ -132,8 +132,8 @@
 .bi-highlight-value {
     font-size: 12px;
     font-weight: 700;
-    color: #2563eb;
-    background: #dbeafe;
+    color: #744ec2;
+    background: #efe7ff;
     padding: 2px 8px;
     border-radius: 4px;
 }
@@ -181,15 +181,15 @@
 
 .bi-detail-card {
     padding: 20px;
-    border: 1px solid #3b82f6;
-    background-color: #eff6ff;
+    border: 1px solid #744ec2;
+    background-color: #f5f0ff;
     border-radius: 8px;
 }
 
 .bi-detail-metric {
     font-size: 11px;
     text-transform: uppercase;
-    color: #3b82f6;
+    color: #744ec2;
     font-weight: 700;
     margin-bottom: 4px;
 }

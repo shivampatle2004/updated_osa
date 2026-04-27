@@ -9,7 +9,7 @@ load_dotenv()
 
 # Database configuration from environment variables
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Sarvesh%4010")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "onestopanalytics")
@@ -82,11 +82,7 @@ def init_db():
                         UserDatabaseConnection, RemoteConnectionProfile, ETLConnection, ETLPipeline, ETLPipelineVersion,
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
-<<<<<<< HEAD
-                        PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig)
-=======
-                        PaginatedReport, RLSRole, RLSRule)
->>>>>>> 1bfa371dd0fd1e1c13c2870a300651cdbd78dec0
+                        PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig, RLSRole, RLSRule)
 
     try:
         Base.metadata.create_all(bind=engine)

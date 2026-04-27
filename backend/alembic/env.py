@@ -7,11 +7,19 @@ from alembic import context
 
 # ADD THIS LINE
 from models import Base
+import os
+import sys
+
+# Ensure backend root is accessible for importing database
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from database import DATABASE_URL
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 # Connect Alembic to SQLAlchemy models
 target_metadata = Base.metadata

@@ -49,6 +49,8 @@ const RoutePersistence = ({ isAuthenticated, userId }) => {
     const nonPersistRoutes = ['/sign-in', '/create-account', '/auth'];
     const isBareRoot = location.pathname === '/' && !location.search;
 
+    console.log(`📍 [RoutePersistence] Location: ${location.pathname}, Auth: ${canRestoreRoute}`);
+
     // If user lands on root without a file query, restore previous route first.
     // Important: do not overwrite saved route with bare "/" on refresh.
     if (
@@ -56,7 +58,9 @@ const RoutePersistence = ({ isAuthenticated, userId }) => {
       isBareRoot
     ) {
       const saved = localStorage.getItem('osa_last_route');
+      console.log(`📍 [RoutePersistence] Saved route found: ${saved}`);
       if (saved && saved !== '/' && saved !== current) {
+        console.log(`📍 [RoutePersistence] Restoring route: ${saved}`);
         navigate(saved, { replace: true });
         return;
       }
@@ -64,6 +68,7 @@ const RoutePersistence = ({ isAuthenticated, userId }) => {
 
     // Persist all navigable routes except auth pages and bare root.
     if (!nonPersistRoutes.includes(location.pathname) && !isBareRoot) {
+      console.log(`📍 [RoutePersistence] Saving route: ${current}`);
       localStorage.setItem('osa_last_route', current);
     }
   }, [location.pathname, location.search, canRestoreRoute, navigate]);
@@ -109,15 +114,19 @@ function App() {
 
   /**
    * Handle user logout
-   * Clears authentication state
+   * Clears authentication state and route history
    */
   const handleLogout = () => {
+    console.log('🚪 [Logout] Clearing authentication state');
     setIsAuthenticated(false)
     setUserName('')
     setUserId(null)
     localStorage.removeItem('isAuthenticated')
     localStorage.removeItem('userName')
     localStorage.removeItem('userId')
+    // CRITICAL: Clear saved route so user doesn't get redirected to workspace after logout
+    localStorage.removeItem('osa_last_route')
+    console.log('✅ [Logout] Auth and route cleared, user will see login page');
   }
 
   const [isDarkMode, setIsDarkMode] = useState(
@@ -155,31 +164,46 @@ function App() {
             toggleTheme={toggleTheme}
           />
           <Routes>
-            <Route path="/" element={<AnalyticsDashboard onLogout={handleLogout} />} />
-            <Route
-              path="/dashboard"
-              element={<Dashboard userName={userName} userId={userId} />}
-            />
-            <Route
-              path="/etl"
-              element={<ETLDashboard />}
-            />
-            <Route
-              path="/analytics/:fileId"
-              element={<AnalyticsDashboard onLogout={handleLogout} />}
-            />
-            <Route
-              path="/reports/builder"
-              element={<PaginatedReportBuilder userId={userId} />}
-            />
-            <Route
-              path="/reports/builder/:reportId"
-              element={<PaginatedReportBuilder userId={userId} />}
-            />
-            <Route
-              path="*"
-              element={<Navigate to="/" replace />}
-            />
+            {/* Auth Routes - Always accessible */}
+            <Route path="/sign-in" element={<SignIn onLogin={handleLogin} />} />
+            <Route path="/create-account" element={<CreateAccount onLogin={handleLogin} />} />
+            
+            {/* Protected Routes - Only accessible when authenticated */}
+            {effectiveIsAuthenticated ? (
+              <>
+                <Route path="/" element={<AnalyticsDashboard onLogout={handleLogout} />} />
+                <Route
+                  path="/dashboard"
+                  element={<Dashboard userName={userName} userId={userId} />}
+                />
+                <Route
+                  path="/etl"
+                  element={<ETLDashboard />}
+                />
+                <Route
+                  path="/analytics/:fileId"
+                  element={<AnalyticsDashboard onLogout={handleLogout} />}
+                />
+                <Route
+                  path="/reports/builder"
+                  element={<PaginatedReportBuilder userId={userId} />}
+                />
+                <Route
+                  path="/reports/builder/:reportId"
+                  element={<PaginatedReportBuilder userId={userId} />}
+                />
+                <Route
+                  path="*"
+                  element={<Navigate to="/" replace />}
+                />
+              </>
+            ) : (
+              <>
+                {/* If not authenticated, show login page for all routes */}
+                <Route path="/" element={<SignIn onLogin={handleLogin} />} />
+                <Route path="*" element={<Navigate to="/sign-in" replace />} />
+              </>
+            )}
           </Routes>
         </Router>
       </ErrorBoundary>

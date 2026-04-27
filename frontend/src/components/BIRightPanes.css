@@ -60,15 +60,17 @@
     padding: 8px;
     cursor: pointer;
     color: #64748b;
+    border: 1px solid transparent;
     border-left: 2px solid transparent;
     transition: all 0.2s;
 }
 
 .bi-pane-tab.active,
 .bi-collapsed-tab.active {
-    color: #2563eb;
-    background: #eff6ff;
-    border-left-color: #2563eb;
+    color: #744ec2;
+    background: #f5f0ff;
+    border-color: #d8c8f2;
+    border-left-color: #744ec2;
 }
 
 .bi-pane-tab:hover,
@@ -240,7 +242,7 @@
 .bi-filter-add-btn {
     /* border: 1px solid #cbd5e1; */
     background: #fff;
-    color: #2563eb;
+    color: #744ec2;
     font-size: 12px;
     font-weight: 600;
     border-radius: 6px;
@@ -322,9 +324,9 @@
 }
 
 .bi-viz-type.active {
-    border-color: #7aa7f6;
+    border-color: #744ec2;
     background: #ffffff;
-    color: #2563eb;
+    color: #744ec2;
 }
 
 .bi-viz-type:hover {
@@ -349,8 +351,8 @@
 }
 
 .bi-viz-sub-tab.active {
-    color: #2563eb;
-    border-bottom-color: #2563eb;
+    color: #744ec2;
+    border-bottom-color: #744ec2;
 }
 
 .bi-build-bucket {
@@ -451,7 +453,7 @@
 }
 
 .bi-database-icon {
-    color: #3b82f6;
+    color: #744ec2;
 }
 
 .bi-table-name {
@@ -477,8 +479,8 @@
 }
 
 .bi-tree-item.active {
-    background: #eff6ff;
-    color: #2563eb;
+    background: #f5f0ff;
+    color: #744ec2;
     font-weight: 500;
 }
 
@@ -496,7 +498,7 @@
 }
 
 .bi-type-text {
-    color: #3b82f6;
+    color: #744ec2;
 }
 
 .bi-type-date {
@@ -504,5 +506,5 @@
 }
 
 .bi-type-bool {
-    color: #8b5cf6;
+    color: #744ec2;
 }

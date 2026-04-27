@@ -92,7 +92,7 @@ export default function ViewAsModal({ fileId, onClose, onOpenManageRoles }) {
             id="vam-none-option"
           >
             <div className="vam-checkbox">
-              {noneSelected && <Check size={11} color="#10b981" strokeWidth={3} />}
+              {noneSelected && <Check size={11} color="#ffffff" strokeWidth={3} />}
             </div>
             <div>
               <div className="vam-option-none-label">None (your own role)</div>
@@ -129,7 +129,9 @@ export default function ViewAsModal({ fileId, onClose, onOpenManageRoles }) {
                   <div className="vam-checkbox">
                     {isChecked && <Check size={10} color="#fff" strokeWidth={3} />}
                   </div>
-                  <div className="vam-role-icon">🛡️</div>
+                  <div className="vam-role-icon">
+                    <Shield size={15} strokeWidth={2.2} />
+                  </div>
                   <div className="vam-role-info">
                     <div className="vam-role-name">{role.name}</div>
                     <div className="vam-role-sub">
@@ -190,7 +192,7 @@ function ApplyBtn({ loading, disabled, noneSelected, selectedCount, onClick }) {
 
 // ── RLS Active Banner (exported separately, rendered by BIWorkspace) ───────────
 
-export function RLSActiveBanner({ activeRoles, rlsData, onExit }) {
+export function RLSActiveBanner({ activeRoles, rlsData, onExit, allowExit = true }) {
   if (!activeRoles || activeRoles.length === 0) return null;
 
   const roleNames = activeRoles.map((r) => {
@@ -209,9 +211,16 @@ export function RLSActiveBanner({ activeRoles, rlsData, onExit }) {
       {filteredPct && (
         <span className="rls-stats-chip">{filteredPct}</span>
       )}
-      <button className="rls-active-banner-exit" onClick={onExit} id="rls-exit-btn">
-        Exit View As
-      </button>
+      {!allowExit && (
+        <span className="rls-active-banner-shared-hint" title="This session was opened from a published link with row-level security">
+          Shared link
+        </span>
+      )}
+      {allowExit && (
+        <button type="button" className="rls-active-banner-exit" onClick={onExit} id="rls-exit-btn">
+          Exit View As
+        </button>
+      )}
     </div>
   );
 }

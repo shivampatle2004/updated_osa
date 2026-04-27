@@ -112,8 +112,8 @@
 }
 
 .bi-file-nav-item.active {
-    background-color: #e5f3ff;
-    color: #0078d4;
+    background-color: #f5f0ff;
+    color: #744ec2;
     font-weight: 600;
 }
 
@@ -196,7 +196,8 @@
 }
 
 .bi-new-card:hover {
-    border-color: #0078d4;
+    border-color: #744ec2;
+    background-color: #f5f0ff;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     transform: translateY(-2px);
 }
@@ -281,6 +282,7 @@
     border: 1px solid #d1d5db;
     border-radius: 6px;
     padding: 5px 10px;
+    width: 160px;
     color: #94a3b8;
 }
 

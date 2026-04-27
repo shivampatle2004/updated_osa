@@ -64,9 +64,9 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
         { id: 'share', icon: '🔗', label: 'Share', action: 'file_share' },
         null,
         { id: 'get_data', icon: '⬇', label: 'Get data', action: 'get_data' },
-        { id: 'import', icon: '📥', label: 'Import', action: 'import' },
-        { id: 'export', icon: '📤', label: 'Export', action: 'export_pdf' },
-        { id: 'publish', icon: '🚀', label: 'Publish', action: 'publish', disabled: true },
+        // { id: 'import', icon: '📥', label: 'Import', action: 'import' },
+        // { id: 'export', icon: '📤', label: 'Export', action: 'export_pdf' },
+        { id: 'publish', icon: '🚀', label: 'Publish', action: 'publish' },
     ];
 
     const bottomNavItems = [

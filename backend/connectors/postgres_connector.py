@@ -25,7 +25,13 @@ class PostgresConnector(BaseConnector):
         db = self.config.get("database", "")
         
         driver = "postgresql+asyncpg" if is_async else "postgresql"
-        return f"{driver}://{user}:{pwd}@{host}:{port}/{db}"
+        base_uri = f"{driver}://{user}:{pwd}@{host}:{port}/{db}"
+        
+        ssl_mode = self.config.get("ssl_mode", "disable")
+        if ssl_mode and ssl_mode != "disable":
+            return f"{base_uri}?sslmode={ssl_mode}"
+            
+        return base_uri
 
     async def test_connection(self) -> bool:
         try:

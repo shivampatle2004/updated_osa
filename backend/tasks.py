@@ -3,16 +3,43 @@ import pandas as pd
 from database import SessionLocal
 from models import UploadedFile, FileColumn, ColumnStatistic, DataVaultItem
 from services.data_processor import DataProcessor
+import services.worksheet_service as ws_svc
 
 import concurrent.futures
+from threading import Lock
+
+
+_PROCESSING_STATUS = {}
+_PROCESSING_STATUS_LOCK = Lock()
+
+
+def update_processing_status(file_id: str, stage: str, message: str, progress: int):
+    with _PROCESSING_STATUS_LOCK:
+        _PROCESSING_STATUS[file_id] = {
+            "stage": stage,
+            "message": message,
+            "progress": max(0, min(int(progress), 100)),
+        }
+
+
+def get_processing_status(file_id: str):
+    with _PROCESSING_STATUS_LOCK:
+        return dict(_PROCESSING_STATUS.get(file_id) or {})
+
+
+def clear_processing_status(file_id: str):
+    with _PROCESSING_STATUS_LOCK:
+        _PROCESSING_STATUS.pop(file_id, None)
 
 
 def run_file_processing(file_id: str):
     print(f"DEBUG: Processing file: {file_id}")
     db = SessionLocal()
     try:
+        update_processing_status(file_id, "processing", "Reading uploaded file...", 20)
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if not file_record:
+            clear_processing_status(file_id)
             return "File record not found"
 
         file_record.status = "processing"
@@ -21,6 +48,7 @@ def run_file_processing(file_id: str):
         # Load file
         print(f"DEBUG: Reading file from path: {file_record.file_path}")
         df = DataProcessor.read_file(file_record.file_path)
+        update_processing_status(file_id, "processing", "Inferring schema and profiling data...", 45)
         
         file_record.row_count = len(df)
         file_record.column_count = len(df.columns)
@@ -73,11 +101,9 @@ def run_file_processing(file_id: str):
             db.add(db_stats)
             column_configs.append({"name": col_name, "type": col_type})
 
+        update_processing_status(file_id, "persisting", "Saving processed data...", 75)
         # Optional graph recommendations are disabled — users add visuals from the ribbon.
         print(f"DEBUG: Skipping auto-generated charts (recommendations disabled)")
-
-        file_record.status = "completed"
-        db.commit()
 
         # ── Auto-save to DataVault ────────────────────────────────────────────
         try:
@@ -87,6 +113,16 @@ def run_file_processing(file_id: str):
             print(f"WARNING: DataVault auto-save failed for {file_id}: {vault_err}")
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── Persist data to Worksheet architecture ────────────────────────────
+        try:
+            _save_to_worksheet(db, file_record, df)
+        except Exception as ws_err:
+            print(f"WARNING: Worksheet import failed for {file_id}: {ws_err}")
+        # ─────────────────────────────────────────────────────────────────────
+
+        file_record.status = "completed"
+        db.commit()
+        update_processing_status(file_id, "completed", "Upload completed successfully.", 100)
         print(f"DEBUG: Successfully processed {file_id}")
         return f"Processed {file_id} successfully"
 
@@ -98,6 +134,7 @@ def run_file_processing(file_id: str):
             file_record.status = "failed"
             file_record.error_message = str(e)
             db.commit()
+        update_processing_status(file_id, "failed", str(e), 100)
         return f"Error processing {file_id}: {str(e)}"
     finally:
         db.close()
@@ -228,7 +265,47 @@ _EXT_TO_SOURCE = {
 }
 
 
+def _save_to_worksheet(db, file_record: UploadedFile, df):
+    """
+    Create a Worksheet record and bulk-import all rows from the DataFrame.
+    Called after UploadedFile processing completes. Best-effort — callers catch exceptions.
+    """
+    mc = file_record.model_config or {}
+    if mc.get("blank_report"):
+        print(f"[WorksheetService] Skipping worksheet persistence for blank report file {file_record.id}")
+        return  # Skip placeholder stubs
+
+    # Check if a Worksheet already exists for this file
+    existing = ws_svc.get_worksheet_for_file(db, file_record.id)
+    if existing and existing.status == "ready":
+        print(f"[WorksheetService] Worksheet already exists for file {file_record.id}, skipping.")
+        return
+
+    if existing:
+        ws = existing
+        print(f"[WorksheetService] Reusing existing worksheet {ws.id} for file {file_record.id}")
+    else:
+        ws = ws_svc.create_worksheet(
+            db=db,
+            name=file_record.file_name or f"Dataset {file_record.id[:8]}",
+            owner_id=file_record.user_id,
+            source_type="file_upload",
+            source_id=file_record.id,
+        )
+        print(
+            f"[WorksheetService] Created worksheet {ws.id} for file {file_record.id} "
+            f"(name={file_record.file_name}, rows={len(df)})"
+        )
+
+    inserted_rows = ws_svc.import_data_from_dataframe(df, ws.id, db=db)
+    print(
+        f"[WorksheetService] Dataset persisted to worksheet_data "
+        f"(worksheet_id={ws.id}, file_id={file_record.id}, rows={inserted_rows})"
+    )
+
+
 def _save_to_data_vault(db, file_record: UploadedFile):
+
     """
     Upsert a DataVaultItem for the given completed UploadedFile.
     Called by run_file_processing (and optionally run_sql_processing) on success.
