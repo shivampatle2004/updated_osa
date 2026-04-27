@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
+*.log
 
 backend/venv/
 backend/.env
@@ -53,4 +56,4 @@ sth.txt
 test_data.csv
 test_upload.csv
 *.resolved
-backend/static/assets/
+backend/static/assets/
