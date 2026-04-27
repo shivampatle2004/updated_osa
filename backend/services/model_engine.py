@@ -68,6 +68,106 @@ class ModelEngine:
             ModelEngine._model_df_cache[cache_key] = (now, df)
 
     @staticmethod
+    def get_model_cache_status(file_id: str, db) -> Dict[str, Any]:
+        """
+        Return whether merged model dataframe is currently served from in-memory cache.
+        """
+        file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+        if not file_record:
+            return {"enabled": True, "cache_hit": False}
+
+        cache_key = ModelEngine._get_cache_key(file_record, db)
+        now = time.time()
+        with ModelEngine._model_df_cache_lock:
+            cached = ModelEngine._model_df_cache.get(cache_key)
+            if not cached:
+                return {"enabled": True, "cache_hit": False, "ttl_seconds": ModelEngine._MODEL_DF_CACHE_TTL_SECONDS}
+            cached_time, _ = cached
+            age = max(0.0, now - cached_time)
+            is_valid = age <= ModelEngine._MODEL_DF_CACHE_TTL_SECONDS
+            if not is_valid:
+                ModelEngine._model_df_cache.pop(cache_key, None)
+            return {
+                "enabled": True,
+                "cache_hit": bool(is_valid),
+                "age_seconds": round(age, 3),
+                "ttl_seconds": ModelEngine._MODEL_DF_CACHE_TTL_SECONDS,
+            }
+
+    @staticmethod
+    def inspect_model_table_sources(file_id: str, db) -> List[Dict[str, Any]]:
+        """
+        Diagnostics for model table data source selection.
+        Reports whether each table can be served from worksheet_data or requires fallback source loads.
+        """
+        file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+        if not file_record:
+            return []
+
+        from services.worksheet_service import get_worksheet_for_file
+
+        mc = file_record.model_config or {}
+        tables_config = mc.get("tables", []) or []
+        rows: List[Dict[str, Any]] = []
+
+        def _display_name(tid: str, table_meta: Optional[Dict[str, Any]] = None) -> str:
+            if table_meta and table_meta.get("name"):
+                return table_meta["name"]
+            rec = db.query(UploadedFile).filter(UploadedFile.id == tid).first()
+            if rec and rec.file_name:
+                return rec.file_name.rsplit(".", 1)[0]
+            return str(tid)
+
+        def _fallback_kind(table_meta: Dict[str, Any], rec: Optional[UploadedFile]) -> str:
+            src = table_meta.get("source") or {}
+            if isinstance(src, dict) and src.get("profile_id"):
+                return "remote_profile"
+            if isinstance(src, dict) and src.get("connection_id"):
+                return "remote_connection"
+            if rec and rec.file_path and str(rec.file_path).startswith("sql://"):
+                return "sql_connection"
+            if rec and rec.file_path:
+                return "file_upload"
+            return "unknown"
+
+        seen_ids = set()
+        table_ids = [file_id]
+        table_ids.extend(
+            t.get("id")
+            for t in tables_config
+            if t.get("id") not in (None, "main", file_id)
+        )
+
+        for tid in table_ids:
+            if not tid or tid in seen_ids:
+                continue
+            seen_ids.add(tid)
+            tmeta = next((t for t in tables_config if t.get("id") == tid), {}) or {}
+            rec = db.query(UploadedFile).filter(UploadedFile.id == tid).first()
+            ws = get_worksheet_for_file(db, tid)
+            if ws and ws.status == "ready" and (ws.total_rows or 0) > 0:
+                served_by = "worksheet_data"
+                worksheet_id = ws.id
+                worksheet_rows = int(ws.total_rows or 0)
+                fallback = None
+            else:
+                served_by = "fallback_source"
+                worksheet_id = ws.id if ws else None
+                worksheet_rows = int(ws.total_rows or 0) if ws else 0
+                fallback = _fallback_kind(tmeta, rec)
+
+            rows.append({
+                "table_id": tid,
+                "table_name": _display_name(tid, tmeta),
+                "served_by": served_by,
+                "worksheet_id": worksheet_id,
+                "worksheet_rows": worksheet_rows,
+                "fallback_kind": fallback,
+            })
+
+        return rows
+
+    @staticmethod
     def get_merged_schema(file_id: str, db) -> list:
         """
         Retrieves the base schema for a file and all reachable tables in the relationship graph.
@@ -318,6 +418,7 @@ class ModelEngine:
         cache_key = ModelEngine._get_cache_key(file_record, db)
         cached_df = ModelEngine._get_cached_df(cache_key)
         if cached_df is not None:
+            print(f"ModelEngine: cache hit for report {base_file_id} (rows={len(cached_df)})")
             return cached_df
 
         from services.data_processor import DataProcessor
@@ -325,10 +426,36 @@ class ModelEngine:
         # 1. Load initial dataframe if not provided
         current_df = initial_df
         if current_df is None:
+            # Try disk first
+            _df_loaded = False
             try:
                 current_df = DataProcessor.read_file(file_record.file_path)
+                _df_loaded = True
             except Exception:
+                pass
+
+            # Fallback: load from worksheet_data (persistent DB)
+            if not _df_loaded or current_df is None or current_df.empty:
+                try:
+                    from services.worksheet_service import get_worksheet_for_file
+                    from services.query_service import get_worksheet_data
+                    ws = get_worksheet_for_file(db, base_file_id)
+                    if ws and ws.status == "ready":
+                        import pandas as _pd
+                        total = ws.total_rows or 0
+                        result = get_worksheet_data(db, ws.id, offset=0, limit=min(total, 500_000))
+                        if result["rows"]:
+                            current_df = _pd.DataFrame(result["rows"])
+                            print(
+                                f"ModelEngine: loaded {len(current_df)} rows from worksheet_data "
+                                f"(worksheet_id={ws.id}, source_file={base_file_id})"
+                            )
+                except Exception as ws_exc:
+                    print(f"ModelEngine: worksheet fallback also failed: {ws_exc}")
+
+            if current_df is None:
                 return pd.DataFrame()
+
 
         tables_config = file_record.model_config.get("tables", [])
         relationships = file_record.model_config.get("relationships", [])
@@ -372,6 +499,26 @@ class ModelEngine:
                         rename_map = {c: f"{table_name} - {c}" for c in df_part.columns}
                         current_df = df_part.rename(columns=rename_map)
                         break
+            # Even without relationships, include all additional tables so workspace refresh keeps
+            # the same multi-table field availability (independent tables in one canvas).
+            extra_parts = []
+            for tmeta in model_tables:
+                tid = tmeta.get("id")
+                if not tid or tid == base_file_id:
+                    continue
+                df_part = _load_table_df_for_merge(tid)
+                if df_part is None or df_part.empty or len(df_part.columns) == 0:
+                    continue
+                table_name = _table_display_name_for_id(tid)
+                rename_map = {c: f"{table_name} - {c}" for c in df_part.columns}
+                extra_parts.append(df_part.rename(columns=rename_map).reset_index(drop=True))
+
+            if extra_parts:
+                if current_df is None or _df_is_placeholder(current_df):
+                    current_df = pd.concat(extra_parts, axis=1)
+                else:
+                    current_df = current_df.reset_index(drop=True)
+                    current_df = pd.concat([current_df] + extra_parts, axis=1)
             ModelEngine._set_cached_df(cache_key, current_df)
             return current_df
 
@@ -390,6 +537,24 @@ class ModelEngine:
 
         def _load_table_df_for_merge(target_tid):
             """Load a model table for merging (upload, sql://, or virtual/remote profile)."""
+            # Prefer persistent worksheet_data so model tables survive source disconnects/restarts.
+            try:
+                from services.worksheet_service import get_worksheet_for_file
+                from services.query_service import get_worksheet_data
+                ws = get_worksheet_for_file(db, target_tid)
+                if ws and ws.status == "ready":
+                    total = ws.total_rows or 0
+                    if total > 0:
+                        ws_result = get_worksheet_data(db, ws.id, offset=0, limit=min(total, 500_000))
+                        if ws_result.get("rows"):
+                            print(
+                                f"ModelEngine: merge source {target_tid} served from worksheet_data "
+                                f"(worksheet_id={ws.id}, rows={len(ws_result['rows'])})"
+                            )
+                            return pd.DataFrame(ws_result["rows"])
+            except Exception as ws_exc:
+                print(f"merge: worksheet load failed {target_tid}: {ws_exc}")
+
             ext_record = db.query(UploadedFile).filter(UploadedFile.id == target_tid).first()
             ext_df = None
             if ext_record and ext_record.status == "completed":
@@ -541,6 +706,32 @@ class ModelEngine:
                                 changed = True
                         except Exception as e:
                             print(f"Merge failed for {target_tid}: {e}")
+
+        # 5. Append unjoined (disconnected) tables horizontally
+        # so that independent single-table charts can still query them.
+        unjoined_dfs = []
+        for tmeta in tables_config:
+            tid = tmeta.get("id")
+            if not tid or tid == "main" or tid == effective_base or tid in joined_table_ids:
+                continue
+            
+            ext_df = _load_table_df_for_merge(tid)
+            if ext_df is not None and not ext_df.empty and len(ext_df.columns) > 0:
+                table_name = get_table_display_name(tid)
+                rename_map = {c: f"{table_name} - {c}" for c in ext_df.columns}
+                ext_df_renamed = ext_df.rename(columns=rename_map)
+                
+                # Reset index to ensure it aligns from 0
+                ext_df_renamed.reset_index(drop=True, inplace=True)
+                unjoined_dfs.append(ext_df_renamed)
+                joined_table_ids.add(tid)
+
+        if unjoined_dfs:
+            if current_df is not None:
+                current_df.reset_index(drop=True, inplace=True)
+                current_df = pd.concat([current_df] + unjoined_dfs, axis=1)
+            else:
+                current_df = pd.concat(unjoined_dfs, axis=1)
 
         ModelEngine._set_cached_df(cache_key, current_df)
         return current_df

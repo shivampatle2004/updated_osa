@@ -149,6 +149,7 @@ const BIWorkspace = ({
   const [datasetLoadError, setDatasetLoadError] = useState(null);
   const [graphs, setGraphs] = useState([]);
   const [processingStatus, setProcessingStatus] = useState('idle');
+  const [modelDiagnostics, setModelDiagnostics] = useState(null);
   
   // -- State: UI Layout & Navigation --
   const [activeView, setActiveView] = useState(() => {
@@ -231,6 +232,7 @@ const BIWorkspace = ({
   const [measures, setMeasures] = useState([]);
   const [isExporting, setIsExporting] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [uploadJob, setUploadJob] = useState({ active: false, phase: 'idle', progress: 0, message: '' });
   const [showAddFileModal, setShowAddFileModal] = useState(false);
   /** True after File → Blank report until data is loaded for the new report or user cancels. Hides the previous report UI. */
   const [isNewReportDraft, setIsNewReportDraft] = useState(false);
@@ -961,12 +963,13 @@ const BIWorkspace = ({
         if (statusData.fileName) setFileName(statusData.fileName);
       }
 
-      // 2-5. Fetch workspace payloads in parallel to reduce startup latency.
-      const [schemaRes, statsRes, graphsRes, modelRes] = await Promise.all([
+      // 2-6. Fetch workspace payloads in parallel to reduce startup latency.
+      const [schemaRes, statsRes, graphsRes, modelRes, diagnosticsRes] = await Promise.all([
         fetch(`/api/files/${fileId}/schema`),
         fetch(`/api/files/${fileId}/statistics`),
         fetch(`/api/files/${fileId}/graphs`),
-        fetch(`/api/files/${fileId}/model`)
+        fetch(`/api/files/${fileId}/model`),
+        fetch(`/api/files/${fileId}/model/diagnostics`)
       ]);
 
       if (schemaRes.ok) {
@@ -992,6 +995,17 @@ const BIWorkspace = ({
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
+      }
+
+      if (diagnosticsRes.ok) {
+        const diag = await diagnosticsRes.json();
+        setModelDiagnostics(diag);
+        console.info(
+          `[Model Diagnostics] all_tables_pg_backed=${diag?.all_tables_pg_backed ? 'true' : 'false'}, cache_hit=${diag?.model_df_cache?.cache_hit ? 'true' : 'false'}`,
+          diag
+        );
+      } else if (!isBackground) {
+        setModelDiagnostics(null);
       }
 
       if (graphsRes.ok) {
@@ -1599,9 +1613,13 @@ const BIWorkspace = ({
     formData.append('file', file);
     if (userId) formData.append('user_id', userId);
     try {
+      setUploadJob({ active: true, phase: 'uploading', progress: 15, message: 'Uploading file...' });
       const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
       if (!res.ok) {
         let msg = `Upload failed (${res.status})`;
+        if (res.status === 413) {
+          msg = 'Upload blocked by server gateway (413 Request Entity Too Large). Increase nginx proxy upload size (client_max_body_size).';
+        }
         try {
           const ct = res.headers.get('content-type') || '';
           if (ct.includes('application/json')) {
@@ -1618,18 +1636,80 @@ const BIWorkspace = ({
       }
 
       const data = await res.json();
+      setUploadJob({ active: true, phase: 'processing', progress: 35, message: 'Processing uploaded data...' });
+      const newFileId = data.file_id;
+      const maxPollAttempts = 240;
+      let attempts = 0;
+      let isComplete = false;
+      while (!isComplete && attempts < maxPollAttempts) {
+        await new Promise((r) => setTimeout(r, 1200));
+        attempts += 1;
+        const statusRes = await fetch(`/api/files/${newFileId}/status`);
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json();
+        const status = String(statusData?.status || '').toLowerCase();
+        const nextProgress = Number.isFinite(Number(statusData?.progress))
+          ? Math.max(0, Math.min(100, Number(statusData.progress)))
+          : (status === 'completed' ? 100 : 55);
+        const nextMessage = statusData?.message || (status === 'completed'
+          ? 'Upload completed successfully.'
+          : 'Processing uploaded data...');
+        setUploadJob({ active: true, phase: status || 'processing', progress: nextProgress, message: nextMessage });
+        if (status === 'completed') isComplete = true;
+        if (status === 'failed') throw new Error(statusData?.error || statusData?.detail || 'Data processing failed');
+      }
+      if (!isComplete) throw new Error('Processing timed out. Please try again.');
       updateRecentFiles(data.file_id, file.name);
+
+      if (fileId && !isNewReportDraft) {
+        try {
+          const addRes = await fetch(`/api/files/${encodeURIComponent(fileId)}/model/add-table`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              table_file_id: data.file_id,
+              table_name: file.name
+            })
+          });
+
+          if (addRes.ok) {
+            const addPayload = await addRes.json();
+            if (addPayload.tables) {
+              setModelTables(addPayload.tables);
+            }
+            // Ask for data rebuild so components see the extra columns
+            fetchInitialData(true);
+            loadDatasetForFeatures(1);
+            setShowAddFileModal(false);
+            if (newFileInputRef.current) newFileInputRef.current.value = '';
+            // Close any inner modal if open
+            setShowEnterDataModal(false);
+            setUploadJob({ active: false, phase: 'idle', progress: 0, message: '' });
+            return true;
+          } else {
+            console.error('Failed to add file to model:', await addRes.text());
+            alert('File uploaded, but failed to link it to the current model.');
+          }
+        } catch (addErr) {
+          console.error('Error adding file to model:', addErr);
+          alert('File uploaded, but there was an error linking it to the current model.');
+        }
+      }
+
       if (onOpenFile) {
         onOpenFile({ id: data.file_id, fileName: file.name });
       } else {
         navigate(`/?fileId=${data.file_id}&fileName=${encodeURIComponent(file.name)}`, { replace: true });
         window.location.reload();
       }
+
       if (newFileInputRef.current) newFileInputRef.current.value = '';
+      setUploadJob({ active: false, phase: 'idle', progress: 0, message: '' });
       return true;
     } catch (err) {
       console.error('Upload failed:', err);
       alert('Upload failed. Please ensure the backend server is running, then try again.');
+      setUploadJob({ active: false, phase: 'error', progress: 100, message: '' });
     }
     if (newFileInputRef.current) newFileInputRef.current.value = '';
     return false;
@@ -3086,6 +3166,7 @@ const BIWorkspace = ({
   const handleEnterDataSubmit = async (file) => {
     setIsInitialLoading(true);
     setShowEnterDataModal(false);
+    setUploadJob({ active: true, phase: 'uploading', progress: 10, message: 'Uploading file...' });
 
     try {
       const formData = new FormData();
@@ -3103,6 +3184,7 @@ const BIWorkspace = ({
       }
       const uploadData = await uploadRes.json();
       const newFileId = uploadData.file_id;
+      setUploadJob({ active: true, phase: 'processing', progress: 30, message: 'Processing uploaded data...' });
 
       // 2. Poll for processing completion
       const maxPollAttempts = 180;
@@ -3116,6 +3198,15 @@ const BIWorkspace = ({
         if (!statusRes.ok) throw new Error(`Status check failed (${statusRes.status})`);
         
         const statusData = await statusRes.json();
+        const nextProgress = Number.isFinite(Number(statusData?.progress))
+          ? Math.max(0, Math.min(100, Number(statusData.progress)))
+          : (statusData.status === 'completed' ? 100 : 60);
+        setUploadJob({
+          active: true,
+          phase: statusData.status || 'processing',
+          progress: nextProgress,
+          message: statusData.message || 'Processing uploaded data...'
+        });
         if (statusData.status === 'completed') {
             isComplete = true;
         } else if (statusData.status === 'failed') {
@@ -3140,6 +3231,7 @@ const BIWorkspace = ({
       console.error(err);
       alert('Failed to process manual data: ' + err.message);
       setIsInitialLoading(false);
+      setUploadJob({ active: false, phase: 'error', progress: 100, message: '' });
     }
   };
 
@@ -3156,6 +3248,18 @@ const BIWorkspace = ({
 
   return (
     <div className={`bi-workspace-root ${reportTheme === 'theme_dark' ? 'dark-theme' : ''} ${reportTheme} ${isMobileLayout ? 'bi-mobile-layout' : ''}`}>
+      {uploadJob.active && (
+        <div className="bi-upload-overlay" role="status" aria-live="polite">
+          <div className="bi-upload-card">
+            <div className="bi-loading-spinner" />
+            <h3>{uploadJob.message || 'Processing...'}</h3>
+            <div className="bi-upload-progress-track">
+              <div className="bi-upload-progress-bar" style={{ width: `${Math.max(0, Math.min(100, uploadJob.progress || 0))}%` }} />
+            </div>
+            <p>{Math.max(0, Math.min(100, Math.round(uploadJob.progress || 0)))}%</p>
+          </div>
+        </div>
+      )}
       {/*
         No `accept` filter: Windows/Edge can hide every file in a folder when extensions/MIME
         do not match (e.g. CSV shown as Excel type). Server validates extensions.
@@ -4093,6 +4197,14 @@ const BIWorkspace = ({
                     <div className="bi-status-right">
                       {fileDetails?.created_at && (
                         <span className="bi-status-item" title="Report created at">{fileDetails.created_at}</span>
+                      )}
+                      {modelDiagnostics && (
+                        <span
+                          className="bi-status-item"
+                          title={`Model source health · cache_hit=${modelDiagnostics?.model_df_cache?.cache_hit ? 'true' : 'false'}`}
+                        >
+                          PG-backed: {modelDiagnostics?.all_tables_pg_backed ? 'Yes' : 'No'}
+                        </span>
                       )}
                       <span className="bi-status-item">{pages.length} pages</span>
                       <span className="bi-status-item">Rows: {fileDetails?.row_count || '0'}</span>

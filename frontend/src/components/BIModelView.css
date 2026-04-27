@@ -4,6 +4,72 @@
     height: 100%;
     background-color: #f8fafc;
     overflow: hidden;
+    position: relative;
+}
+
+.bi-model-import-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+.bi-model-import-card {
+    width: min(400px, calc(100% - 32px));
+    background: #fff;
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 16px 35px rgba(15, 23, 42, 0.25);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.bi-model-import-card h3 {
+    margin: 0;
+    font-size: 15px;
+    color: #0f172a;
+}
+
+.bi-model-import-card p {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.bi-model-import-spinner {
+    width: 34px;
+    height: 34px;
+    border: 4px solid #e2e8f0;
+    border-top-color: #78176b;
+    border-radius: 50%;
+    animation: biModelImportSpin 0.9s linear infinite;
+}
+
+.bi-model-import-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.bi-model-import-bar {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #78176b 0%, #9333ea 100%);
+    transition: width 220ms ease;
+}
+
+@keyframes biModelImportSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .bi-model-toolbar {

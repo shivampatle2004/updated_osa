@@ -4,13 +4,13 @@ from database import SessionLocal
 import models, schemas
 import pandas as pd
 import os
-import shutil
 import math
 from services.smart_analyzer import SmartAnalyzer
 from services.data_processor import DataProcessor
 from typing import List, Optional, Any
 from pydantic import BaseModel
 import uuid
+from services.upload_limits import save_upload_file
 
 router = APIRouter(prefix="/api/smart", tags=["smart"])
 
@@ -41,8 +41,7 @@ async def process_smart_query(
         temp_id = uuid.uuid4()
         extension = file.filename.split(".")[-1].lower()
         temp_path = os.path.join(UPLOAD_DIR, f"temp_{temp_id}.{extension}")
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        save_upload_file(file, temp_path)
         try:
             df = DataProcessor.read_file(temp_path)
             os.remove(temp_path)

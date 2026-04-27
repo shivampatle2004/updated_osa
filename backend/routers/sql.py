@@ -5,12 +5,13 @@ from database import SessionLocal, engine as local_engine
 import models, schemas
 from services.sql_engine import SQLEngine
 from services.data_processor import DataProcessor
+import services.worksheet_service as ws_svc
 import os
-import shutil
 import uuid
 import json
 import pandas as pd
 from typing import Optional, List, Dict, Any
+from services.upload_limits import save_upload_file
 
 router = APIRouter(prefix="/api/sql", tags=["sql"])
 
@@ -41,8 +42,7 @@ async def upload_sql_file(
     file_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}.sql")
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    save_upload_file(file, file_path)
 
     try:
         # Create a record in UploadedFile to track this file
@@ -401,6 +401,8 @@ async def import_sql_table(
         }
         target_engine = SQLEngine.get_external_db_engine(db_config)
         df_sample = SQLEngine.execute_query(f"SELECT * FROM {table_name} LIMIT 10", target_engine)
+        # Materialize full table into persistent worksheet_data (PostgreSQL-backed storage).
+        df_full = SQLEngine.execute_query(f"SELECT * FROM {table_name}", target_engine)
         col_types = SQLEngine.infer_column_types(df_sample)
         
         for col_name, dtype in col_types.items():
@@ -426,7 +428,26 @@ async def import_sql_table(
                  print(f"Stats calculation failed for {col_name}: {e}")
             
         db.commit()
-        return {"file_id": file_id, "message": f"Table {table_name} imported successfully."}
+
+        try:
+            ws = ws_svc.get_worksheet_for_file(db, file_id)
+            if not ws:
+                ws = ws_svc.create_worksheet(
+                    db=db,
+                    name=f"{conn_record.connection_name}.{table_name}",
+                    owner_id=user_id,
+                    source_type="sql_query",
+                    source_id=file_id,
+                )
+            ws_svc.import_data_from_dataframe(df_full, ws.id, db=db)
+        except Exception as ws_err:
+            raise HTTPException(status_code=500, detail=f"Imported table metadata but worksheet persistence failed: {ws_err}")
+
+        return {
+            "file_id": file_id,
+            "worksheet_id": ws.id if ws else None,
+            "message": f"Table {table_name} imported successfully."
+        }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to import table: {str(e)}")

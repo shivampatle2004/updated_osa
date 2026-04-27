@@ -242,6 +242,7 @@ const BIModelView = ({
     // Import file state
     const fileImportRef = useRef(null);
     const [isImporting, setIsImporting] = useState(false);
+    const [importJob, setImportJob] = useState({ active: false, progress: 0, message: '' });
 
     // SQL Import State
     const [userConnections, setUserConnections] = useState([]);
@@ -527,6 +528,7 @@ const BIModelView = ({
         if (!file) return;
 
         setIsImporting(true);
+        setImportJob({ active: true, progress: 12, message: 'Uploading file...' });
         const formData = new FormData();
         formData.append('file', file);
         if (userId) formData.append('user_id', userId);
@@ -539,10 +541,14 @@ const BIModelView = ({
             });
             if (!uploadRes.ok) {
                 const uploadErr = await uploadRes.json().catch(() => ({}));
+                if (uploadRes.status === 413) {
+                    throw new Error("Upload blocked by server gateway (413 Request Entity Too Large). Increase nginx proxy upload size (client_max_body_size).");
+                }
                 throw new Error(uploadErr.detail || uploadErr.message || "Upload failed");
             }
             const uploadData = await uploadRes.json();
             const newFileId = uploadData.file_id;
+            setImportJob({ active: true, progress: 30, message: 'Processing uploaded data...' });
 
             // 2. Poll for completion
             const maxPollAttempts = 180;
@@ -556,6 +562,14 @@ const BIModelView = ({
                     throw new Error(`Status check failed (${statusRes.status})`);
                 }
                 const statusData = await statusRes.json();
+                const nextProgress = Number.isFinite(Number(statusData?.progress))
+                    ? Math.max(0, Math.min(100, Number(statusData.progress)))
+                    : (statusData.status === 'completed' ? 100 : 60);
+                setImportJob({
+                    active: true,
+                    progress: nextProgress,
+                    message: statusData.message || 'Processing uploaded data...',
+                });
                 if (statusData.status === 'completed') isComplete = true;
                 if (statusData.status === 'failed') {
                     throw new Error(statusData.detail || statusData.message || statusData.error || "Data processing failed");
@@ -592,8 +606,10 @@ const BIModelView = ({
         } catch (err) {
             console.error(err);
             alert("Failed to import table: " + err.message);
+            setImportJob({ active: false, progress: 100, message: '' });
         } finally {
             setIsImporting(false);
+            setImportJob({ active: false, progress: 0, message: '' });
             if (fileImportRef.current) fileImportRef.current.value = '';
         }
     };
@@ -718,15 +734,22 @@ const BIModelView = ({
 
     const handleEnterDataSubmitTable = async (file) => {
         setIsImporting(true);
+        setImportJob({ active: true, progress: 12, message: 'Uploading file...' });
         const formData = new FormData();
         formData.append('file', file);
         if (userId) formData.append('user_id', userId);
 
         try {
             const uploadRes = await fetch('/api/files/upload', { method: 'POST', body: formData });
-            if (!uploadRes.ok) throw new Error("Upload failed");
+            if (!uploadRes.ok) {
+                if (uploadRes.status === 413) {
+                    throw new Error("Upload blocked by server gateway (413 Request Entity Too Large). Increase nginx proxy upload size (client_max_body_size).");
+                }
+                throw new Error("Upload failed");
+            }
             const uploadData = await uploadRes.json();
             const newFileId = uploadData.file_id;
+            setImportJob({ active: true, progress: 30, message: 'Processing uploaded data...' });
 
             const maxPollAttempts = 180;
             let attempts = 0;
@@ -737,6 +760,14 @@ const BIModelView = ({
                 const statusRes = await fetch(`/api/files/${newFileId}/status`);
                 if (!statusRes.ok) throw new Error(`Status check failed`);
                 const statusData = await statusRes.json();
+                const nextProgress = Number.isFinite(Number(statusData?.progress))
+                    ? Math.max(0, Math.min(100, Number(statusData.progress)))
+                    : (statusData.status === 'completed' ? 100 : 60);
+                setImportJob({
+                    active: true,
+                    progress: nextProgress,
+                    message: statusData.message || 'Processing uploaded data...',
+                });
                 if (statusData.status === 'completed') isComplete = true;
                 if (statusData.status === 'failed') throw new Error("Data processing failed");
                 if (attempts >= maxPollAttempts) throw new Error("Processing timed out.");
@@ -770,8 +801,10 @@ const BIModelView = ({
         } catch (err) {
             console.error(err);
             alert("Failed to create manual entry table: " + err.message);
+            setImportJob({ active: false, progress: 100, message: '' });
         } finally {
             setIsImporting(false);
+            setImportJob({ active: false, progress: 0, message: '' });
         }
     };
 
@@ -960,6 +993,18 @@ const BIModelView = ({
                 />
             )}
             <div className="bi-model-view">
+            {importJob.active && (
+                <div className="bi-model-import-overlay" role="status" aria-live="polite">
+                    <div className="bi-model-import-card">
+                        <div className="bi-model-import-spinner" />
+                        <h3>{importJob.message || 'Processing...'}</h3>
+                        <div className="bi-model-import-track">
+                            <div className="bi-model-import-bar" style={{ width: `${Math.max(0, Math.min(100, importJob.progress || 0))}%` }} />
+                        </div>
+                        <p>{Math.max(0, Math.min(100, Math.round(importJob.progress || 0)))}%</p>
+                    </div>
+                </div>
+            )}
             <div className="bi-model-toolbar">
                 <span className="bi-model-toolbar-label">Model View</span>
                 <div className="bi-model-toolbar-actions">
