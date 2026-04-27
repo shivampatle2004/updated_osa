@@ -13,6 +13,7 @@ from services.upload_limits import save_upload_file, MAX_UPLOAD_BYTES
 from tasks import run_file_processing, get_processing_status
 import services.worksheet_service as ws_svc
 import uuid
+import traceback
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -1480,3 +1481,60 @@ def get_model_diagnostics(file_id: str, db: Session = Depends(get_db)):
         "all_tables_pg_backed": all_tables_pg_backed,
         "table_sources": table_sources,
     }
+
+
+@router.delete("/{file_id}")
+def delete_file(file_id: str, db: Session = Depends(get_db)):
+    """🗑️ Delete an uploaded file, its associated records, and its physical storage."""
+    try:
+        file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # 1. Resolve path and delete physical file from disk
+        file_path = resolve_stored_file_path(file_record)
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"🗑️ Physical file deleted: {file_path}")
+            except Exception as e:
+                print(f"❌ Failed to delete file from disk: {e}")
+
+        # 2. Delete associated Worksheet architecture data
+        # WorksheetColumn, WorksheetPermission, DataImportQueue cascade automatically if set up in models.py
+        # But we'll be thorough.
+        worksheets = db.query(models.Worksheet).filter(models.Worksheet.source_id == file_id).all()
+        for ws in worksheets:
+            # Manually clear WorksheetData (rows) as it's not cascaded in the Worksheet model
+            db.query(models.WorksheetData).filter(models.WorksheetData.worksheet_id == ws.id).delete()
+            db.delete(ws)
+            print(f"🗑️ Deleted Worksheet: {ws.id}")
+
+        # 3. Delete associated RLS Roles and Rules
+        # We must delete Rules first because of Foreign Key constraints
+        roles = db.query(models.RLSRole).filter(models.RLSRole.file_id == file_id).all()
+        for role in roles:
+            db.query(models.RLSRule).filter(models.RLSRule.role_id == role.id).delete()
+            db.delete(role)
+        print(f"🗑️ Deleted {len(roles)} RLS Roles and their rules for file {file_id}")
+
+        # 4. Delete associated DataVault items
+        db.query(models.DataVaultItem).filter(models.DataVaultItem.file_id == file_id).delete()
+        print(f"🗑️ Deleted DataVault items for file {file_id}")
+
+        # 5. Clear cache if any
+        if file_path:
+            DataProcessor.clear_cache_for_file(file_path)
+
+        # 6. Delete the main record (cascades to FileColumn, GraphDefinition)
+        db.delete(file_record)
+        db.commit()
+
+        print(f"✅ Successfully deleted file {file_id} and all related metadata")
+        return {"success": True, "message": f"File {file_id} deleted successfully"}
+
+    except Exception as e:
+        db.rollback()
+        print(f"💥 CRITICAL ERROR during file deletion: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
