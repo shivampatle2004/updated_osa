@@ -10,7 +10,8 @@ import {
     AppWindow, Image, MousePointer2, TrendingUp, Square, Circle, Minus, Triangle, ArrowRight,
     Users, Eye, Lock, Globe, Settings, Play, BookOpen, ExternalLink, Terminal, Cpu, Info, Palette,
     Calendar, RefreshCw, UserCheck, Languages, Binary, FileJson, Smartphone, Layers, Timer, Filter, Bookmark, Link2, Tag, X,
-    Archive, FileText as FileTextIcon
+    Archive, FileText as FileTextIcon,
+    Sparkles, Brain, AlertTriangle, Target, Lightbulb, Compass, Download, MessageCircle, FileBarChart
 } from 'lucide-react';
 import InstallVisualModal from './InstallVisualModal';
 import './BIRibbon.css';
@@ -92,9 +93,10 @@ const BIRibbon = ({
     onUpdateColumn, fileId, dataset,
     dateHierarchy, dateFilter, setDateFilter,
     hideSecurityTools = false,
+    aiMode = 'ceo',
 }) => {
     let tabs = [
-        'File', 'Home', 'Insert', 'Modeling', 'View',
+        'File', 'Home', 'Insert', 'Modeling', 'View', 'AI Insights',
         // 'Help', 'Table tools', 'External Tools',
     ];
     if (activeMeasure) {
@@ -267,6 +269,8 @@ const BIRibbon = ({
         { id: 'view_fit_page', label: 'Fit to page' },
         { id: 'view_fit_width', label: 'Fit to width' },
         { id: 'view_actual', label: 'Actual size' },
+        null,
+        { id: 'view_present', icon: <Play size={16} />, label: 'Present' },
     ];
 
     const pageColorOptions = [
@@ -353,7 +357,7 @@ const BIRibbon = ({
 
             {/* ── Queries ── */}
             <Group label="Queries">
-                <div className="bi-dropdown-wrapper">
+                {/* <div className="bi-dropdown-wrapper">
                     <RibbonBtn
                         icon={<FileCode size={32} />}
                         label="Transform data"
@@ -365,7 +369,7 @@ const BIRibbon = ({
                     {openDropdown === 'transform_data' && (
                         <Dropdown options={transformDataOptions} onClose={closeDropdown} onSelect={act} />
                     )}
-                </div>
+                </div> */}
 
                 <RibbonBtn
                     icon={<RotateCcw size={32} />}
@@ -437,12 +441,12 @@ const BIRibbon = ({
                     tooltip="Open the formula editor to create a dynamic measure"
                 />
 
-                <RibbonBtn
+                {/* <RibbonBtn
                     icon={<Zap size={32} />}
                     label="Quick measure"
                     onClick={() => act('quick_measures')}
                     tooltip="Guided calculation templates for common use cases"
-                />
+                /> */}
             </Group>
 
             {/* ── Sensitivity (hidden) ── */}
@@ -748,6 +752,12 @@ const BIRibbon = ({
                             <Dropdown options={pageViewOptions} onClose={closeDropdown} onSelect={act} />
                         )}
                     </div>
+                    <RibbonBtn
+                        icon={<Play size={32} />}
+                        label="Present"
+                        onClick={() => act('view_present')}
+                        tooltip="Present report in fullscreen mode"
+                    />
                 </Group>
 
                 {/* ── Mobile ── */}
@@ -1112,6 +1122,116 @@ const BIRibbon = ({
 
     const renderFileToolbar = () => null; // File tab opens overlay, not toolbar
 
+    // ── AI Insights toolbar ──────────────────────────────────────────────
+    const aiModeOptions = [
+        { id: 'ai_mode_ceo', icon: <span style={{ fontSize: 14 }}>👔</span>, label: 'Executive Summary', sub: 'Strategic, concise, business-impact' },
+        { id: 'ai_mode_technical', icon: <span style={{ fontSize: 14 }}>🧪</span>, label: 'Explain Technically', sub: 'Statistical and analytical depth' },
+        { id: 'ai_mode_simple', icon: <span style={{ fontSize: 14 }}>💡</span>, label: 'Explain Simply', sub: 'Plain language, no jargon' },
+        { id: 'ai_mode_financial', icon: <span style={{ fontSize: 14 }}>💼</span>, label: 'Financial View', sub: 'Revenue, cost, margin lens' },
+        { id: 'ai_mode_sales', icon: <span style={{ fontSize: 14 }}>📈</span>, label: 'Sales View', sub: 'Pipeline, conversion, regions' },
+    ];
+
+    const AI_MODE_LABELS = {
+        ceo: 'Executive',
+        technical: 'Technical',
+        simple: 'Simple',
+        financial: 'Financial',
+        sales: 'Sales',
+    };
+
+    const renderAIInsightsToolbar = () => (
+        <>
+            {/* ── Explain ── */}
+            <Group label="Explain">
+                <RibbonBtn
+                    icon={<Sparkles size={32} color="#8b6dd6" />}
+                    label="Explain this chart"
+                    onClick={() => act('ai_explain')}
+                    tooltip="Generate an AI explanation of the currently selected visual"
+                />
+                <RibbonBtn
+                    icon={<TrendingUp size={32} color="#0ea5e9" />}
+                    label="Explain trend"
+                    onClick={() => act('ai_trend')}
+                    tooltip="Compare current vs previous, growth/decline with percentages"
+                />
+                <RibbonBtn
+                    icon={<AlertTriangle size={32} color="#f59e0b" />}
+                    label="Detect anomalies"
+                    onClick={() => act('ai_anomalies')}
+                    tooltip="Flag abnormal spikes or dips in the chart data"
+                />
+                <RibbonBtn
+                    icon={<Target size={32} color="#ef4444" />}
+                    label="Root cause"
+                    onClick={() => act('ai_root_cause')}
+                    tooltip="Identify which dimension members are driving the result"
+                />
+            </Group>
+
+            {/* ── AI Modes ── */}
+            <Group label="AI mode">
+                <div className="bi-dropdown-wrapper" style={{ height: 'auto' }}>
+                    <RibbonBtn
+                        icon={<Brain size={32} color="#5b3aa3" />}
+                        label={AI_MODE_LABELS[aiMode] ? `Mode: ${AI_MODE_LABELS[aiMode]}` : 'AI mode'}
+                        onClick={() => toggleDropdown('ai_modes')}
+                        tooltip="Switch the persona / tone of the AI explanations"
+                    >
+                        <ChevronDown size={11} style={{ marginLeft: 2 }} />
+                    </RibbonBtn>
+                    {openDropdown === 'ai_modes' && (
+                        <Dropdown options={aiModeOptions} onClose={closeDropdown} onSelect={act} />
+                    )}
+                </div>
+            </Group>
+
+            {/* ── Actions ── */}
+            <Group label="Actions">
+                <RibbonBtn
+                    icon={<Compass size={32} color="#14b8a6" />}
+                    label="Generate summary"
+                    onClick={() => act('ai_summary')}
+                    tooltip="Produce a tight executive summary of the visual"
+                />
+                <RibbonBtn
+                    icon={<Lightbulb size={32} color="#22c55e" />}
+                    label="Next steps"
+                    onClick={() => act('ai_next_steps')}
+                    tooltip="Suggested actions and follow-ups based on the analysis"
+                />
+                <RibbonBtn
+                    icon={<BookOpen size={32} color="#a855f7" />}
+                    label="Create AI story"
+                    onClick={() => act('ai_story')}
+                    tooltip="Generate a narrative, presentation-style story for this chart"
+                />
+                <RibbonBtn
+                    icon={<Download size={32} color="#475569" />}
+                    label="Export AI report"
+                    onClick={() => act('ai_export')}
+                    tooltip="Download the current AI insights as a Markdown report"
+                />
+            </Group>
+
+            {/* ── AI Assistant ── */}
+            <Group label="AI assistant">
+                <RibbonBtn
+                    icon={<MessageSquare size={32} color="#3b82f6" />}
+                    label="Ask this visual"
+                    onClick={() => act('ai_ask')}
+                    tooltip="Open a Q&A composer focused on the selected visual"
+                />
+                <RibbonBtn
+                    icon={<MessageCircle size={32} color="#3b82f6" />}
+                    label="Chat with chart"
+                    onClick={() => act('ai_chat')}
+                    tooltip="Have a back-and-forth conversation about this chart"
+                />
+            </Group>
+        </>
+    );
+
     const renderToolbar = () => {
         switch (activeTab) {
             case 'File': return renderFileToolbar();
@@ -1119,6 +1239,7 @@ const BIRibbon = ({
             case 'Insert': return renderInsertToolbar();
             case 'Modeling': return renderModelingToolbar();
             case 'View': return renderViewToolbar();
+            case 'AI Insights': return renderAIInsightsToolbar();
             /* case 'Help': return renderHelpToolbar();
             case 'Table tools': return renderTableToolsToolbar();
             case 'External Tools': return renderExternalToolsToolbar(); */
@@ -1153,12 +1274,14 @@ const BIRibbon = ({
             <div className="bi-ribbon-tabs">
                 {tabs.map(tab => {
                     const isContextTab = tab === 'Measure tools' || tab === 'Column tools';
+                    const isAITab = tab === 'AI Insights';
                     return (
                         <button
                             key={tab}
-                            className={`bi-ribbon-tab ${activeTab === tab ? 'active' : ''} ${tab === 'File' ? 'bi-file-tab' : ''} ${isContextTab ? 'bi-context-tab' : ''} ${(isContextTab && activeTab === tab) ? 'bi-context-tab-active' : ''}`}
+                            className={`bi-ribbon-tab ${activeTab === tab ? 'active' : ''} ${tab === 'File' ? 'bi-file-tab' : ''} ${isContextTab ? 'bi-context-tab' : ''} ${(isContextTab && activeTab === tab) ? 'bi-context-tab-active' : ''} ${isAITab ? 'bi-ai-tab-pill' : ''}`}
                             onClick={() => handleTabClick(tab)}
                         >
+                            {isAITab && <Sparkles size={12} className="bi-ai-tab-pill-icon" />}
                             {tab}
                         </button>
                     )

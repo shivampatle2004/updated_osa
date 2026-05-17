@@ -10,7 +10,7 @@ import useVisualRegistryStore from '../store/visualRegistryStore';
 import BIVisualGeneralPane from './BIVisualGeneralPane';
 import { VIBRANT_PALETTE } from '../constants/chartPalette';
 
-const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, schema, dataset }) => {
+const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, schema, dataset, isFieldsRefreshing = false }) => {
     const [viewMode, setViewMode] = useState('build'); // 'build', 'format', 'general'
     const [isSelectorCollapsed, setIsSelectorCollapsed] = useState(false);
 
@@ -516,10 +516,28 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
 
                 {viewMode === 'build' && selectedVisual?.graph_type !== 'influencers' && selectedVisual?.graph_type !== 'power_app' && (
                     <div className="bi-build-area">
+                        {isFieldsRefreshing && (
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                padding: '8px 10px',
+                                marginBottom: 10,
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 8,
+                                background: '#f8fafc',
+                                color: '#334155',
+                                fontSize: 12,
+                                fontWeight: 600,
+                            }}>
+                                <div className="bi-loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+                                Refreshing Dimensions/Measures…
+                            </div>
+                        )}
                         <div className="bi-build-bucket">
                             <div className="bi-fieldwell-header">
                                 <span className="bi-bucket-label">Dimensions</span>
-                                <button type="button" className="bi-fieldwell-add-btn" onClick={addDimension} disabled={!selectedVisual}>
+                                <button type="button" className="bi-fieldwell-add-btn" onClick={addDimension} disabled={!selectedVisual || isFieldsRefreshing}>
                                     + Add
                                 </button>
                             </div>
@@ -529,7 +547,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                         className="bi-bucket-select"
                                         value={dimension}
                                         onChange={(e) => handleDimensionChange(idx, e.target.value)}
-                                        disabled={!selectedVisual}
+                                        disabled={!selectedVisual || isFieldsRefreshing}
                                     >
                                         <option value="">Select dimension</option>
                                         {dimensionCandidates.map((field) => (
@@ -552,7 +570,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                         <div className="bi-build-bucket">
                             <div className="bi-fieldwell-header">
                                 <span className="bi-bucket-label">Measures</span>
-                                <button type="button" className="bi-fieldwell-add-btn" onClick={addMeasure} disabled={!selectedVisual}>
+                                <button type="button" className="bi-fieldwell-add-btn" onClick={addMeasure} disabled={!selectedVisual || isFieldsRefreshing}>
                                     + Add
                                 </button>
                             </div>
@@ -562,7 +580,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                         className="bi-bucket-select"
                                         value={measure.column || ''}
                                         onChange={(e) => handleMeasureColumnChange(idx, e.target.value)}
-                                        disabled={!selectedVisual}
+                                        disabled={!selectedVisual || isFieldsRefreshing}
                                     >
                                         <option value="">Select numeric column</option>
                                         {measureCandidates.map((field) => (
@@ -575,7 +593,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                         className="bi-bucket-select bi-agg-select"
                                         value={measure.aggregation || 'SUM'}
                                         onChange={(e) => handleMeasureAggregationChange(idx, e.target.value)}
-                                        disabled={!selectedVisual}
+                                        disabled={!selectedVisual || isFieldsRefreshing}
                                     >
                                         {AGGREGATION_OPTIONS.map((agg) => (
                                             <option key={agg} value={agg}>{agg}</option>

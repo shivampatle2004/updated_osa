@@ -81,7 +81,8 @@ def build_aggregate_by_dimension_sql(
         ensure_alias(parent)
         ensure_alias(child)
 
-    ft_name = quote_sql_identifier(fact_src[1], db_type)
+    fact_table_name = f"{fact_src[2]}.{fact_src[1]}" if len(fact_src) > 2 and fact_src[2] and "." not in fact_src[1] else fact_src[1]
+    ft_name = quote_sql_identifier(fact_table_name, db_type)
     fact_alias = aliases[fact_table_id]
 
     join_sql_parts: List[str] = []
@@ -93,7 +94,8 @@ def build_aggregate_by_dimension_sql(
         ch_src = table_meta_to_source(ch_meta)
         if not ch_src or ch_src[0] != connection_id:
             continue
-        ch_name = quote_sql_identifier(ch_src[1], db_type)
+        ch_table_name = f"{ch_src[2]}.{ch_src[1]}" if len(ch_src) > 2 and ch_src[2] and "." not in ch_src[1] else ch_src[1]
+        ch_name = quote_sql_identifier(ch_table_name, db_type)
         calias = aliases[child]
         lc = quote_sql_identifier(pcol, db_type)
         rc = quote_sql_identifier(ccol, db_type)

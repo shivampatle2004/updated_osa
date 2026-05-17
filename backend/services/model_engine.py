@@ -145,7 +145,9 @@ class ModelEngine:
             tmeta = next((t for t in tables_config if t.get("id") == tid), {}) or {}
             rec = db.query(UploadedFile).filter(UploadedFile.id == tid).first()
             ws = get_worksheet_for_file(db, tid)
-            if ws and ws.status == "ready" and (ws.total_rows or 0) > 0:
+            # A table is PostgreSQL-backed as soon as worksheet_data is ready, even when
+            # it legitimately has zero rows (empty source table/import).
+            if ws and ws.status == "ready":
                 served_by = "worksheet_data"
                 worksheet_id = ws.id
                 worksheet_rows = int(ws.total_rows or 0)
@@ -481,23 +483,89 @@ class ModelEngine:
             tr = db.query(UploadedFile).filter(UploadedFile.id == tid).first()
             return tr.file_name.split(".")[0] if tr and tr.file_name else "table"
 
+        def _load_model_table_df_prefer_worksheet(tmeta):
+            """
+            For independent model tables (no relationships), prefer worksheet_data first so
+            DB-imported tables still render after remote session expiry/reconnect.
+            """
+            tid = tmeta.get("id")
+            if not tid:
+                return None
+            try:
+                from services.worksheet_service import get_worksheet_for_file
+                from services.query_service import get_worksheet_data
+                ws = get_worksheet_for_file(db, tid)
+                if ws and ws.status == "ready":
+                    total = ws.total_rows or 0
+                    if total > 0:
+                        ws_result = get_worksheet_data(db, ws.id, offset=0, limit=min(total, 500_000))
+                        if ws_result.get("rows"):
+                            return pd.DataFrame(ws_result["rows"])
+            except Exception:
+                pass
+
+            from services.model_data_loader import load_table_dataframe
+            meta_for_load = dict(tmeta or {})
+            source = dict((meta_for_load.get("source") or {}))
+            if source.get("connection_id") and source.get("table_name") and not source.get("profile_id"):
+                try:
+                    from models import RemoteConnectionProfile
+                    if file_record.user_id:
+                        prof = (
+                            db.query(RemoteConnectionProfile)
+                            .filter(RemoteConnectionProfile.user_id == file_record.user_id)
+                            .order_by(RemoteConnectionProfile.created_at.desc())
+                            .first()
+                        )
+                        if prof:
+                            source["profile_id"] = prof.id
+                except Exception:
+                    pass
+            if source:
+                meta_for_load["source"] = source
+            try:
+                df_loaded = load_table_dataframe(meta_for_load, db)
+                # Stabilize remote SQL tables: once loaded, snapshot into worksheet_data so
+                # visuals don't disappear later when ephemeral DB sessions expire.
+                try:
+                    if (
+                        df_loaded is not None
+                        and not df_loaded.empty
+                        and isinstance(source, dict)
+                        and source.get("table_name")
+                    ):
+                        from services import worksheet_service as ws_svc
+                        ws = ws_svc.get_worksheet_for_file(db, tid)
+                        if not (ws and ws.status == "ready" and (ws.total_rows or 0) > 0):
+                            ws = ws or ws_svc.create_worksheet(
+                                db=db,
+                                name=_table_display_name_for_id(tid),
+                                owner_id=file_record.user_id,
+                                source_type="remote_sql",
+                                source_id=tid,
+                            )
+                            ws_svc.import_data_from_dataframe(df_loaded, ws.id, db=db)
+                except Exception as ws_err:
+                    print(f"ModelEngine: worksheet snapshot warning for {tid}: {ws_err}")
+                return df_loaded
+            except Exception:
+                return None
+
         # No relationship lines yet: charts/Data view still need a real frame. If the base CSV is a
         # placeholder but the user added one or more model tables (e.g. DB import), load the first
         # reachable table and prefix columns like get_merged_schema ("salesdata - col").
         if not relationships:
             model_tables = [t for t in tables_config if t.get("id") not in (None, "main")]
+            seeded_table_id = None
             if _df_is_placeholder(current_df) and model_tables:
-                from services.model_data_loader import load_table_dataframe
                 for tmeta in model_tables:
-                    try:
-                        df_part = load_table_dataframe(tmeta, db)
-                    except Exception:
-                        df_part = None
+                    df_part = _load_model_table_df_prefer_worksheet(tmeta)
                     if df_part is not None and len(df_part.columns) > 0:
                         tid = tmeta.get("id")
                         table_name = _table_display_name_for_id(tid)
                         rename_map = {c: f"{table_name} - {c}" for c in df_part.columns}
                         current_df = df_part.rename(columns=rename_map)
+                        seeded_table_id = tid
                         break
             # Even without relationships, include all additional tables so workspace refresh keeps
             # the same multi-table field availability (independent tables in one canvas).
@@ -506,7 +574,10 @@ class ModelEngine:
                 tid = tmeta.get("id")
                 if not tid or tid == base_file_id:
                     continue
-                df_part = _load_table_df_for_merge(tid)
+                if seeded_table_id and tid == seeded_table_id:
+                    # Already used as the primary frame above; don't append it again.
+                    continue
+                df_part = _load_model_table_df_prefer_worksheet(tmeta)
                 if df_part is None or df_part.empty or len(df_part.columns) == 0:
                     continue
                 table_name = _table_display_name_for_id(tid)

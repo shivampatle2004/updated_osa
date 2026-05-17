@@ -26,7 +26,7 @@ function AuthPage({ isAuthenticated, onLogin }) {
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    navigate('/dashboard')
+    navigate('/')
     return null
   }
 
@@ -100,7 +100,7 @@ function AuthPage({ isAuthenticated, onLogin }) {
 
       const name = isSignUp ? data.full_name : data.user.full_name
       onLogin(name || formData.email.split('@')[0])
-      navigate('/dashboard')
+      navigate('/')
     } catch (err) {
       setErrors({ submit: err.message })
     } finally {

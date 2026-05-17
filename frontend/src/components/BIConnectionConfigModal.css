@@ -22,7 +22,7 @@
 }
 
 .bi-config-modal-container {
-  width: min(720px, 100%);
+  width: min(1080px, 100%);
   max-width: 100%;
   background: var(--bi-cfg-surface);
   border-radius: 8px;
@@ -32,7 +32,7 @@
     0 24px 48px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
-  max-height: min(680px, calc(100vh - 48px));
+  max-height: min(860px, calc(100vh - 28px));
   border: 1px solid var(--bi-cfg-border);
   overflow: hidden;
   position: relative;
@@ -156,8 +156,8 @@
 
 .bi-config-modal-form {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
   align-items: start;
 }
 

@@ -21,6 +21,8 @@ import {
   File as FileIcon,
   ArrowUpDown,
   ChevronDown,
+  PlugZap,
+  Plus,
 } from 'lucide-react';
 import './BISavedConnectionsPanel.css';
 
@@ -59,6 +61,8 @@ export default function BISavedConnectionsPanel({
   activeConnectionId,
   activeProfileId,
   onConnected,
+  onDisconnected,
+  onMoreConnectors,
   isGuest,
 }) {
   const navigate = useNavigate();
@@ -68,6 +72,7 @@ export default function BISavedConnectionsPanel({
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [connectingId, setConnectingId] = useState(null);
+  const [disconnectingId, setDisconnectingId] = useState(null);
   const [editing, setEditing] = useState(null);
   const [detailPanelProfileId, setDetailPanelProfileId] = useState(null);
   const [detailTab, setDetailTab] = useState('files');
@@ -433,6 +438,32 @@ export default function BISavedConnectionsPanel({
     }
   };
 
+  const handleDisconnect = async (profileId) => {
+    setDisconnectingId(profileId);
+    setError('');
+    try {
+      const res = await fetch(`/api/connections/disconnect/${encodeURIComponent(profileId)}`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Disconnect failed');
+      if (onDisconnected) {
+        onDisconnected({
+          profileId: data.profile_id || profileId,
+          closedConnectionIds: data.closed_connection_ids || [],
+        });
+      }
+      await load();
+      if (detailPanelIdRef.current === profileId) {
+        await loadActivity(profileId);
+      }
+    } catch (e) {
+      setError(e.message || 'Disconnect failed');
+    } finally {
+      setDisconnectingId(null);
+    }
+  };
+
   const toggleFavorite = async (profileId, current) => {
     try {
       const res = await fetch(`/api/connections/${encodeURIComponent(profileId)}/favorite`, {
@@ -508,7 +539,7 @@ export default function BISavedConnectionsPanel({
       <div className="bi-conn-panel-inner">
         <header className="bi-conn-header">
           <div className="bi-conn-header-title">
-            <Link2 size={22} className="bi-conn-header-icon" aria-hidden />
+            {/* <Link2 size={22} className="bi-conn-header-icon" aria-hidden /> */}
             <div>
               <h1 className="bi-conn-h1">Saved connections</h1>
               <p className="bi-conn-sub">One-click connect — credentials stay encrypted on the server.</p>
@@ -532,6 +563,18 @@ export default function BISavedConnectionsPanel({
                 ? `${items.length} connection${items.length === 1 ? '' : 's'}`
                 : `${filtered.length} of ${items.length} shown`}
             </p>
+            {onMoreConnectors && (
+              <button
+                type="button"
+                className="bi-conn-more-connectors"
+                onClick={() => onMoreConnectors()}
+                title="Browse all data connectors"
+              >
+                <PlugZap size={15} aria-hidden />
+                <span>More connectors</span>
+                <Plus size={13} className="bi-conn-more-connectors-plus" aria-hidden />
+              </button>
+            )}
             <button type="button" className="bi-conn-icon-btn" onClick={() => load()} disabled={loading} title="Refresh list">
               <RefreshCw size={18} className={loading ? 'bi-conn-spin' : ''} />
             </button>
@@ -552,7 +595,20 @@ export default function BISavedConnectionsPanel({
         ) : filtered.length === 0 ? (
           <div className="bi-conn-empty">
             <p>No saved connections yet.</p>
-            <p className="bi-conn-muted">Use <strong>Get Data → PostgreSQL</strong> and enable &quot;Save to recent connections&quot; when you connect.</p>
+            <p className="bi-conn-muted">
+              Open the connector catalog to pick a database, or use <strong>Get Data → PostgreSQL</strong> and enable
+              &quot;Save to recent connections&quot;.
+            </p>
+            {onMoreConnectors && (
+              <button
+                type="button"
+                className="bi-conn-empty-cta"
+                onClick={() => onMoreConnectors()}
+              >
+                <PlugZap size={16} aria-hidden />
+                Browse data connectors
+              </button>
+            )}
           </div>
         ) : (
           <ul className="bi-conn-grid">
@@ -588,20 +644,38 @@ export default function BISavedConnectionsPanel({
                           {isConn ? 'Connected' : 'Idle'}
                         </span>
                         <div className="bi-conn-actions">
-                          <button
-                            type="button"
-                            className="bi-conn-btn bi-conn-btn-primary"
-                            disabled={connectingId === c.id}
-                            onClick={() => handleConnect(c.id)}
-                          >
-                            {connectingId === c.id ? (
-                              <>
-                                <Loader2 size={14} className="bi-conn-spin" /> …
-                              </>
-                            ) : (
-                              'Connect'
-                            )}
-                          </button>
+                          {isConn ? (
+                            <button
+                              type="button"
+                              className="bi-conn-btn bi-conn-btn-disconnect"
+                              disabled={disconnectingId === c.id}
+                              onClick={() => handleDisconnect(c.id)}
+                              title="End the active session for this connection"
+                            >
+                              {disconnectingId === c.id ? (
+                                <>
+                                  <Loader2 size={14} className="bi-conn-spin" /> …
+                                </>
+                              ) : (
+                                'Disconnect'
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="bi-conn-btn bi-conn-btn-primary"
+                              disabled={connectingId === c.id}
+                              onClick={() => handleConnect(c.id)}
+                            >
+                              {connectingId === c.id ? (
+                                <>
+                                  <Loader2 size={14} className="bi-conn-spin" /> …
+                                </>
+                              ) : (
+                                'Connect'
+                              )}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="bi-conn-btn bi-conn-btn-ghost bi-conn-btn-details"

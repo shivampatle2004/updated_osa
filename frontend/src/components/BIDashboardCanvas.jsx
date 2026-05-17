@@ -366,6 +366,17 @@ const BIDashboardCanvas = ({
         return Math.max(baseWidth, rightMostEdge + 48);
     }, [graphs]);
 
+    const canvasMinHeight = React.useMemo(() => {
+        const baseHeight = 900;
+        const bottomMostEdge = (graphs || []).reduce((maxEdge, graph) => {
+            const opts = graph?.options || {};
+            const y = typeof opts.y === 'number' ? opts.y : 0;
+            const height = typeof opts.height === 'number' ? opts.height : 360;
+            return Math.max(maxEdge, y + height);
+        }, 0);
+        return Math.max(baseHeight, bottomMostEdge + 48);
+    }, [graphs]);
+
     return (
         <div
             className={`bi-canvas ${isDraggingOverCanvas ? 'drag-over' : ''}`}
@@ -447,7 +458,11 @@ const BIDashboardCanvas = ({
             <div
                 className="bi-visuals-grid"
                 ref={workspaceRef}
-                style={{ minWidth: `${canvasMinWidth}px`, backgroundColor: reportBackgroundColor || '#ffffff' }}
+                style={{
+                    minWidth: `${canvasMinWidth}px`,
+                    minHeight: `${canvasMinHeight}px`,
+                    backgroundColor: reportBackgroundColor || '#ffffff'
+                }}
                 onDragOver={handleCanvasDragOver}
                 onDrop={handleCanvasDrop}
                 onMouseDown={(e) => {

@@ -22,7 +22,7 @@ function SignIn({ isAuthenticated, onLogin }) {
 
     // Redirect if already authenticated
     if (isAuthenticated) {
-        navigate('/dashboard')
+        navigate('/')
         return null
     }
 
@@ -85,7 +85,7 @@ function SignIn({ isAuthenticated, onLogin }) {
             const name = data.user.full_name
             const id = data.user.id
             if (onLogin) onLogin(name || formData.email.split('@')[0], id)
-            navigate('/dashboard')
+            navigate('/')
         } catch (err) {
             setErrors({ submit: err.message })
         } finally {

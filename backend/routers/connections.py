@@ -224,6 +224,29 @@ def connect_saved(profile_id: str, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/disconnect/{profile_id}")
+def disconnect_saved(profile_id: str, db: Session = Depends(get_db)):
+    """Tear down the active in-memory session(s) bound to this saved connection profile."""
+    row = db.query(RemoteConnectionProfile).filter(RemoteConnectionProfile.id == profile_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    sessions = remote_db_manager.list_connections()
+    closed_ids = []
+    for s in sessions:
+        if _session_matches_profile(s, row):
+            cid = s.get("connection_id")
+            if cid and remote_db_manager.close_connection(cid):
+                closed_ids.append(cid)
+
+    return {
+        "success": True,
+        "profile_id": row.id,
+        "closed_connection_ids": closed_ids,
+        "was_active": len(closed_ids) > 0,
+    }
+
+
 @router.put("/{profile_id}")
 def update_connection(profile_id: str, body: SavedConnectionUpdate, db: Session = Depends(get_db)):
     row = db.query(RemoteConnectionProfile).filter(RemoteConnectionProfile.id == profile_id).first()

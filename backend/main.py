@@ -10,7 +10,7 @@ from pathlib import Path
 from database import SessionLocal, init_db
 import models, schemas
 from auth_utils import get_password_hash, verify_password
-from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls
+from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls, ai_insights
 from routers.worksheets import router as worksheets_router, files_router as ws_files_router
 import asyncio
 import sys
@@ -67,6 +67,7 @@ app.include_router(data_vault.router)
 app.include_router(reports.router)
 app.include_router(modeling.router)
 app.include_router(rls.router)
+app.include_router(ai_insights.router)
 app.include_router(worksheets_router)
 app.include_router(ws_files_router)
 

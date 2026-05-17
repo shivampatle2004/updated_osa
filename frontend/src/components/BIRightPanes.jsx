@@ -5,7 +5,7 @@ import BIVisualizationsPane from './BIVisualizationsPane';
 import BIFieldsPane from './BIFieldsPane';
 import './BIRightPanes.css';
 
-const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisual, onAddVisual, isCollapsed, onToggleCollapse, measures, activeColumn, onSelectColumn, forcedActiveTab, onActiveTabChange }) => {
+const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisual, onAddVisual, isCollapsed, onToggleCollapse, measures, activeColumn, onSelectColumn, forcedActiveTab, onActiveTabChange, isFieldsRefreshing = false }) => {
     const [activeTab, setActiveTab] = useState('visualizations'); // 'filters', 'visualizations', 'fields'
     const currentTab = forcedActiveTab || activeTab;
 
@@ -79,6 +79,7 @@ const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisua
                         onAddVisual={onAddVisual}
                         schema={schema}
                         dataset={dataset}
+                        isFieldsRefreshing={isFieldsRefreshing}
                     />
                 )}
                 {currentTab === 'fields' && (
@@ -89,6 +90,7 @@ const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisua
                         measures={measures}
                         activeColumn={activeColumn}
                         onSelectColumn={onSelectColumn}
+                        isFieldsRefreshing={isFieldsRefreshing}
                     />
                 )}
             </div>

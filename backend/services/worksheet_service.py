@@ -45,8 +45,28 @@ def _safe_scalar(v: Any) -> Any:
     """Convert numpy/pandas scalars and NaN → JSON-safe Python primitives."""
     if v is None:
         return None
-    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-        return None
+    if isinstance(v, (str, int, bool)):
+        return v
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(v).decode("utf-8", errors="replace")
+        except Exception:
+            return str(v)
+    try:
+        from decimal import Decimal
+        if isinstance(v, Decimal):
+            try:
+                return float(v)
+            except Exception:
+                return str(v)
+    except Exception:
+        pass
     if hasattr(v, "isoformat") and not isinstance(v, (str, bytes)):
         try:
             return v.isoformat()
@@ -57,7 +77,16 @@ def _safe_scalar(v: Any) -> Any:
             return v.item()
         except Exception:
             pass
-    return v
+    if isinstance(v, (list, tuple, set)):
+        return [_safe_scalar(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _safe_scalar(val) for k, val in v.items()}
+    try:
+        import json as _json
+        _json.dumps(v)
+        return v
+    except Exception:
+        return str(v)
 
 
 def _df_to_json_rows(df: pd.DataFrame, start_row: int = 0) -> List[Dict]:

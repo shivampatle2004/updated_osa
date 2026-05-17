@@ -61,9 +61,9 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
         null, // divider
         { id: 'save', icon: '💾', label: 'Save', action: 'file_save' },
         { id: 'save_as', icon: '📄', label: 'Save as', action: 'file_save_as' },
-        { id: 'share', icon: '🔗', label: 'Share', action: 'file_share' },
+        // { id: 'share', icon: '🔗', label: 'Share', action: 'file_share' },
         null,
-        { id: 'get_data', icon: '⬇', label: 'Get data', action: 'get_data' },
+        // { id: 'get_data', icon: '⬇', label: 'Get data', action: 'get_data' },
         // { id: 'import', icon: '📥', label: 'Import', action: 'import' },
         // { id: 'export', icon: '📤', label: 'Export', action: 'export_pdf' },
         { id: 'publish', icon: '🚀', label: 'Publish', action: 'publish' },
@@ -71,7 +71,7 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
 
     const bottomNavItems = [
         { id: 'logout', label: 'Logout', action: 'route_logout' },
-        { id: 'options', label: 'Options and settings', action: 'route_options' },
+        // { id: 'options', label: 'Options and settings', action: 'route_options' },
         { id: 'about', label: 'About', action: 'route_about' },
     ];
 
@@ -207,13 +207,13 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
                             <span className="bi-rec-tab-dot" />
                             Recent
                         </button>
-                        <button
+                        {/* <button
                             className={`bi-rec-tab ${recommendedTab === 'shared' ? 'active' : ''}`}
                             onClick={() => setRecommendedTab('shared')}
                         >
                             <span className="bi-rec-tab-icon">👥</span>
                             Shared with me
-                        </button>
+                        </button> */}
 
                         <div className="bi-rec-filter">
                             <div className="bi-rec-filter-input">

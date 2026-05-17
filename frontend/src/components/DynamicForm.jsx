@@ -10,7 +10,7 @@ const API_BASE = '/api';
 /**
  * Renders a single form field based on a JSON Schema property.
  */
-const FormField = ({ name, schema, value, onChange, error }) => {
+const FormField = ({ name, schema, value, onChange, error, className = '' }) => {
   const [showPassword, setShowPassword] = useState(false);
 
   const isPassword = schema.format === 'password' || schema.secret === true;
@@ -35,7 +35,7 @@ const FormField = ({ name, schema, value, onChange, error }) => {
 
   if (isBoolean) {
     return (
-      <div className="dyn-field dyn-field-toggle">
+      <div className={`dyn-field dyn-field-toggle ${className}`.trim()}>
         <label className="dyn-toggle-wrap" htmlFor={fieldId}>
           <input
             id={fieldId}
@@ -55,7 +55,7 @@ const FormField = ({ name, schema, value, onChange, error }) => {
 
   if (isEnum) {
     return (
-      <div className="dyn-field">
+      <div className={`dyn-field ${className}`.trim()}>
         <label className="dyn-label" htmlFor={fieldId}>{label}</label>
         <select
           id={fieldId}
@@ -75,7 +75,7 @@ const FormField = ({ name, schema, value, onChange, error }) => {
 
   if (isObject || isArray) {
     return (
-      <div className="dyn-field">
+      <div className={`dyn-field ${className}`.trim()}>
         <label className="dyn-label" htmlFor={fieldId}>{label}</label>
         <textarea
           id={fieldId}
@@ -99,7 +99,7 @@ const FormField = ({ name, schema, value, onChange, error }) => {
 
   if (isPassword) {
     return (
-      <div className="dyn-field">
+      <div className={`dyn-field ${className}`.trim()}>
         <label className="dyn-label" htmlFor={fieldId}>{label}</label>
         <div className="dyn-password-wrap">
           <input
@@ -129,7 +129,7 @@ const FormField = ({ name, schema, value, onChange, error }) => {
   const inputType = schema.type === 'integer' || schema.type === 'number' ? 'number' : 'text';
 
   return (
-    <div className="dyn-field">
+    <div className={`dyn-field ${className}`.trim()}>
       <label className="dyn-label" htmlFor={fieldId}>{label}</label>
       <input
         id={fieldId}
@@ -267,6 +267,30 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
   const properties = schema.properties || {};
   const required = schema.required || [];
 
+  const getFieldGridClass = (key, fieldSchema) => {
+    if (!fieldSchema) return '';
+    if (fieldSchema.type === 'object' || fieldSchema.type === 'array' || fieldSchema.type === 'boolean') {
+      return 'dyn-field--full';
+    }
+    const fullWidthKeys = new Set([
+      'query',
+      'where',
+      'output_file_name',
+      'output_file_path',
+      'connection_string',
+      'headers',
+      'params',
+      'body',
+      'file_path',
+      'path',
+      'token',
+      'refresh_token',
+      'table',
+    ]);
+    if (fullWidthKeys.has(key)) return 'dyn-field--full';
+    return '';
+  };
+
   // Separate output_file_name from regular fields
   const regularFields = Object.entries(properties).filter(([k]) => k !== 'output_file_name');
   const hasOutputField = 'output_file_name' in properties;
@@ -282,6 +306,7 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
             value={values[key]}
             onChange={handleChange}
             error={errors[key]}
+            className={getFieldGridClass(key, fieldSchema)}
           />
         ))}
 
@@ -294,6 +319,7 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
               value={values.output_file_name}
               onChange={handleChange}
               error={errors.output_file_name}
+              className={getFieldGridClass('output_file_name', properties.output_file_name)}
             />
           </>
         )}

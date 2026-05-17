@@ -46,10 +46,14 @@ async def upload_sql_file(
 
     try:
         # Create a record in UploadedFile to track this file
+        display_name = file.filename
+        if not display_name.lower().endswith(".osa"):
+            display_name += ".osa"
+
         db_file = models.UploadedFile(
             id=file_id,
             user_id=user_id,
-            file_name=file.filename,
+            file_name=display_name,
             file_path=file_path,
             status="pending" # Set to pending for background processing
         )
@@ -207,10 +211,14 @@ async def save_sql_as_dataset(
         df.to_csv(file_path, index=False)
         
         # 3. Create UploadedFile record
+        display_name = file_name
+        if not display_name.lower().endswith(".osa"):
+            display_name += ".osa"
+
         db_file = models.UploadedFile(
             id=file_id,
             user_id=user_id,
-            file_name=file_name,
+            file_name=display_name,
             file_path=file_path,
             status="pending",
             row_count=len(df),
@@ -379,10 +387,14 @@ async def import_sql_table(
     
     # Create the virtual file record
     # Note: we use status='completed' immediately because we'll fetch its schema now
+    display_name = f"{conn_record.connection_name}.{table_name}"
+    if not display_name.lower().endswith(".osa"):
+        display_name += ".osa"
+
     db_file = models.UploadedFile(
         id=file_id,
         user_id=user_id,
-        file_name=f"{conn_record.connection_name}.{table_name}",
+        file_name=display_name,
         file_path=f"sql://{connection_id}/{table_name}", # Pseudo-path
         status="completed"
     )

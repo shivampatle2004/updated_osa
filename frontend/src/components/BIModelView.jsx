@@ -189,48 +189,150 @@ const BIModelView = ({
         setModelExtras({});
     }, [fileId]);
 
-    // Synchronize props to state ONLY on initial load
+    // Synchronize props to state.
+    // IMPORTANT: Blank reports can mount BIModelView before backend tables arrive.
+    // If we mark `isLoaded=true` too early, later props won't populate and tables "disappear".
     React.useEffect(() => {
+        const incomingTables = Array.isArray(propsInitialTables) ? propsInitialTables : [];
+        const incomingRels = Array.isArray(propsInitialRelationships) ? propsInitialRelationships : [];
+
+        // If backend tables arrive at any time and our canvas is empty, adopt them.
+        if (incomingTables.length > 0 && tables.length === 0) {
+            setTables(incomingTables);
+            setRelationships(incomingRels);
+            setIsLoaded(true);
+            return;
+        }
+
+        // First mount: fall back to a synthetic main table when available.
         if (!isLoaded) {
-            if (propsInitialTables && propsInitialTables.length > 0) {
-                setTables(propsInitialTables);
-                setRelationships(propsInitialRelationships || []);
+            if (incomingTables.length > 0) {
+                setTables(incomingTables);
+                setRelationships(incomingRels);
                 setIsLoaded(true);
-            } else if (computedInitialTables.length > 0 && tables.length === 0) {
+                return;
+            }
+            if (computedInitialTables.length > 0 && tables.length === 0) {
                 setTables(computedInitialTables);
                 setIsLoaded(true);
-            } else if (
+                return;
+            }
+            if (
                 modelWorkspaceReady &&
                 suppressMainTableInModel &&
                 tables.length === 0 &&
-                (!propsInitialTables || propsInitialTables.length === 0) &&
+                incomingTables.length === 0 &&
                 computedInitialTables.length === 0
             ) {
                 setIsLoaded(true);
             }
         }
-    }, [propsInitialTables, propsInitialRelationships, computedInitialTables, isLoaded, suppressMainTableInModel, modelWorkspaceReady]);
+    }, [
+        propsInitialTables,
+        propsInitialRelationships,
+        computedInitialTables,
+        isLoaded,
+        suppressMainTableInModel,
+        modelWorkspaceReady,
+        tables.length,
+    ]);
 
     // Save changes to backend automatically
+    const prevPayloadStrRef = React.useRef(null);
+
+    const persistModelNow = useCallback(async (nextTables, nextRelationships, nextExtras = null) => {
+        if (!fileId) throw new Error('No report is open (missing fileId).');
+        const payload = {
+            ...(nextExtras && typeof nextExtras === 'object' ? nextExtras : modelExtras),
+            tables: Array.isArray(nextTables) ? nextTables : [],
+            relationships: Array.isArray(nextRelationships) ? nextRelationships : [],
+        };
+        if ((payload.tables || []).length > 0) payload.blank_report = false;
+
+        const res = await fetch(`/api/files/${fileId}/model`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const msg = data?.detail || data?.message || `HTTP ${res.status}`;
+            throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+        }
+        // Keep autosave baseline in sync so it won't immediately re-save the same payload.
+        try {
+            prevPayloadStrRef.current = JSON.stringify(payload);
+        } catch (_) {
+            /* ignore */
+        }
+        if (onModelUpdate) await onModelUpdate();
+        return true;
+    }, [fileId, modelExtras, onModelUpdate]);
+
     React.useEffect(() => {
         if (!isLoaded || !fileId) return;
 
-        const saveTimer = setTimeout(() => {
-            const payload = { ...modelExtras, tables, relationships };
-            if (tables.length > 0) {
-                payload.blank_report = false;
+        const payload = { ...modelExtras, tables, relationships };
+        if (tables.length > 0) {
+            payload.blank_report = false;
+        }
+
+        const payloadStr = JSON.stringify(payload);
+        if (payloadStr === prevPayloadStrRef.current) return;
+
+        let isStructural = false;
+        if (prevPayloadStrRef.current) {
+            try {
+                const old = JSON.parse(prevPayloadStrRef.current);
+                const stripXY = (ts) => (ts || []).map(t => ({ ...t, x: 0, y: 0 }));
+                if (
+                    JSON.stringify(stripXY(tables)) !== JSON.stringify(stripXY(old.tables)) ||
+                    JSON.stringify(relationships) !== JSON.stringify(old.relationships)
+                ) {
+                    isStructural = true;
+                }
+            } catch (e) {
+                isStructural = true;
             }
+        } else {
+            isStructural = true;
+        }
+
+        prevPayloadStrRef.current = payloadStr;
+
+        let isCancelled = false;
+
+        const doSave = () => {
             fetch(`/api/files/${fileId}/model`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: payloadStr,
+                keepalive: true
             })
-            .then(() => onModelUpdate && onModelUpdate())
-            .catch(err => console.error('Auto-save failed', err));
-        }, 1000); // 1s debounce
+            .then(async (res) => {
+                if (!res.ok) {
+                    const errBody = await res.json().catch(() => ({}));
+                    const detail = errBody?.detail || errBody?.message || `HTTP ${res.status}`;
+                    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+                }
+                if (onModelUpdate) onModelUpdate();
+            })
+            .catch(err => {
+                console.error('Auto-save failed', err);
+            });
+        };
 
-        return () => clearTimeout(saveTimer);
-    }, [tables, relationships, modelExtras, isLoaded, fileId]);
+        if (isStructural) {
+            doSave();
+            return () => { isCancelled = true; };
+        } else {
+            const saveTimer = setTimeout(doSave, 1000);
+            return () => {
+                isCancelled = true;
+                clearTimeout(saveTimer);
+            };
+        }
+    }, [tables, relationships, modelExtras, isLoaded, fileId, onModelUpdate]);
     const [dragging, setDragging] = useState(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const canvasRef = useRef(null);
@@ -249,8 +351,11 @@ const BIModelView = ({
     const [savedProfiles, setSavedProfiles] = useState([]);
     const [selectedConn, setSelectedConn] = useState('');
     const [schemaTables, setSchemaTables] = useState([]);
+    const [catalogTables, setCatalogTables] = useState([]);
     const [selectedTable, setSelectedTable] = useState('');
     const [pgSchema, setPgSchema] = useState('public');
+    const [schemaOptions, setSchemaOptions] = useState(['public']);
+    const [selectedSchemas, setSelectedSchemas] = useState(['public']);
     const [schemaLoading, setSchemaLoading] = useState(false);
     const [schemaError, setSchemaError] = useState('');
     const [editingProfile, setEditingProfile] = useState(null);
@@ -285,11 +390,16 @@ const BIModelView = ({
         setSchemaLoading(true);
         try {
             const sch = (schemaName ?? pgSchema).trim() || 'public';
+            const selectedList = Array.isArray(selectedSchemas) ? selectedSchemas.filter(Boolean) : [];
+            const schemaList = selectedList.length === 0
+                ? [sch]
+                : (selectedList.includes(sch) ? selectedList : [sch]);
             const q = new URLSearchParams({
                 connection_id: connId,
-                pg_schema: sch,
                 include_row_counts: 'true',
             });
+            q.set('pg_schemas', schemaList.join(','));
+            q.set('pg_schema', sch);
             if (refresh) q.set('refresh', 'true');
             const res = await fetch(`/api/db/schema?${q.toString()}`);
             const data = await res.json().catch(() => ({}));
@@ -305,7 +415,63 @@ const BIModelView = ({
         } finally {
             setSchemaLoading(false);
         }
-    }, [pgSchema]);
+    }, [pgSchema, selectedSchemas]);
+
+    const fetchCatalogTablesForConnection = useCallback(async (connId, { refresh = false, schemas = [] } = {}) => {
+        if (!connId) {
+            setCatalogTables([]);
+            return;
+        }
+        try {
+            const schemaList = (Array.isArray(schemas) ? schemas : []).filter(Boolean);
+            const q = new URLSearchParams({
+                connection_id: connId,
+                include_row_counts: 'true',
+            });
+            if (schemaList.length > 0) {
+                q.set('pg_schemas', schemaList.join(','));
+                q.set('pg_schema', schemaList[0]);
+            }
+            if (refresh) q.set('refresh', 'true');
+            const res = await fetch(`/api/db/schema?${q.toString()}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setCatalogTables([]);
+                return;
+            }
+            setCatalogTables(Array.isArray(data.tables) ? data.tables : []);
+        } catch (_) {
+            setCatalogTables([]);
+        }
+    }, []);
+
+    const fetchSchemaOptions = useCallback(async (connId) => {
+        if (!connId) {
+            setSchemaOptions(['public']);
+            setSelectedSchemas(['public']);
+            setPgSchema('public');
+            return ['public'];
+        }
+        try {
+            const q = new URLSearchParams({ connection_id: connId });
+            const res = await fetch(`/api/db/schemas?${q.toString()}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || 'Failed to load schemas');
+            const nextSchemas = Array.isArray(data.schemas) && data.schemas.length > 0 ? data.schemas : ['public'];
+            setSchemaOptions(nextSchemas);
+            setSelectedSchemas((prev) => {
+                const valid = (Array.isArray(prev) ? prev : []).filter((s) => nextSchemas.includes(s));
+                return valid.length > 0 ? valid : [nextSchemas[0]];
+            });
+            setPgSchema((prev) => (nextSchemas.includes(prev) ? prev : nextSchemas[0]));
+            return nextSchemas;
+        } catch (_) {
+            setSchemaOptions(['public']);
+            setSelectedSchemas(['public']);
+            setPgSchema('public');
+            return ['public'];
+        }
+    }, []);
 
     const fetchSchemaRef = useRef(fetchSchemaForConnection);
     fetchSchemaRef.current = fetchSchemaForConnection;
@@ -335,6 +501,8 @@ const BIModelView = ({
                 const pick = preferred && list.some((c) => c.connection_id === preferred) ? preferred : firstId || '';
                 if (pick) {
                     setSelectedConn(pick);
+                    const schemas = await fetchSchemaOptions(pick);
+                    await fetchCatalogTablesForConnection(pick, { refresh: false, schemas });
                     await fetchSchemaRef.current(pick, { refresh: false });
                 } else {
                     setSelectedConn('');
@@ -349,7 +517,7 @@ const BIModelView = ({
         return () => {
             cancelled = true;
         };
-    }, [showSqlImportModal, userId]);
+    }, [showSqlImportModal, userId, fetchSchemaOptions, fetchCatalogTablesForConnection]);
 
     // Keep side-panel catalog hydrated even when SQL import modal is closed.
     React.useEffect(() => {
@@ -371,6 +539,8 @@ const BIModelView = ({
                 const pick = preferred && list.some((c) => c.connection_id === preferred) ? preferred : firstId;
                 if (!pick) return;
                 if (pick !== selectedConn) setSelectedConn(pick);
+                const schemas = await fetchSchemaOptions(pick);
+                await fetchCatalogTablesForConnection(pick, { refresh: false, schemas });
                 await fetchSchemaRef.current(pick, { refresh: false });
             } catch (err) {
                 console.error('Failed to load model catalog source', err);
@@ -378,7 +548,7 @@ const BIModelView = ({
         };
         loadCatalogSource();
         return () => { cancelled = true; };
-    }, []);
+    }, [selectedConn, fetchSchemaOptions, fetchCatalogTablesForConnection]);
 
     const handleConnChange = async (connId) => {
         if (connId !== selectedConn) {
@@ -394,6 +564,8 @@ const BIModelView = ({
         } catch (_) {
             /* ignore */
         }
+        const schemas = await fetchSchemaOptions(connId);
+        await fetchCatalogTablesForConnection(connId, { refresh: true, schemas });
         await fetchSchemaForConnection(connId, { refresh: false });
     };
 
@@ -421,6 +593,8 @@ const BIModelView = ({
             const refreshed = await fetch('/api/db/connections').then((r) => r.json());
             setUserConnections(refreshed.connections || []);
             setSelectedConn(cid);
+            const schemas = await fetchSchemaOptions(cid);
+            await fetchCatalogTablesForConnection(cid, { refresh: true, schemas });
             await fetchSchemaForConnection(cid, { refresh: true });
         } catch (err) {
             setSchemaError(err.message || 'Connection failed');
@@ -473,23 +647,34 @@ const BIModelView = ({
 
     const handleImportSqlTable = async (tableNameArg = null) => {
         const fromArg = typeof tableNameArg === 'string' ? tableNameArg : '';
-        const tableName = (fromArg || selectedTable || '').trim();
+        const selectedKey = (fromArg || selectedTable || '').trim();
+        const availableTables = [
+            ...(Array.isArray(schemaTables) ? schemaTables : []),
+            ...(Array.isArray(catalogTables) ? catalogTables : []),
+        ];
+        const selectedTableSchema = availableTables.find((t) => {
+            const key = `${t.schema || 'public'}.${t.table_name}`;
+            return key === selectedKey || t.table_name === selectedKey;
+        });
+        const tableName = (selectedTableSchema?.table_name || '').trim();
         if (!selectedConn || !tableName) return;
         setIsImporting(true);
         try {
-            const selectedTableSchema = (schemaTables || []).find((t) => t.table_name === tableName);
             if (!selectedTableSchema) throw new Error("Selected table schema not found — try Refresh tables");
 
             const rect = canvasRef.current?.getBoundingClientRect();
             const baseX = rect ? Math.max(40, rect.width * 0.25) : 120;
             const baseY = rect ? Math.max(40, rect.height * 0.2) : 120;
             const colorIndex = (tables.length + 1) % TABLE_COLORS.length;
-            const tableId = `db-${selectedConn}-${tableName}`;
+            const schemaName = selectedTableSchema.schema || 'public';
+            const tableId = `db-${selectedConn}-${schemaName}-${tableName}`;
 
             let profileIdForSource = null;
             try {
                 const sessConn = sessionStorage.getItem('osa_remote_connection_id');
-                const sessProf = sessionStorage.getItem('osa_last_activated_profile_id');
+                const sessProf =
+                    sessionStorage.getItem('osa_last_activated_profile_id') ||
+                    sessionStorage.getItem('osa_remote_profile_id');
                 if (sessConn && selectedConn === sessConn && sessProf) {
                     profileIdForSource = sessProf;
                 }
@@ -497,12 +682,13 @@ const BIModelView = ({
                 /* ignore */
             }
 
-            setTables(prev => [...prev, {
+            const idx = Array.isArray(tables) ? tables.length : 0;
+            const newTable = {
                 id: tableId,
-                name: tableName,
+                name: `${schemaName}.${tableName}`,
                 colorIndex,
-                x: Math.round(baseX + prev.length * 40),
-                y: Math.round(baseY + prev.length * 28),
+                x: Math.round(baseX + idx * 40),
+                y: Math.round(baseY + idx * 28),
                 columns: selectedTableSchema.columns.map(c => ({
                     name: c.name,
                     type: c.data_type || 'text',
@@ -511,9 +697,19 @@ const BIModelView = ({
                 source: {
                     connection_id: selectedConn,
                     table_name: tableName,
+                    schema: schemaName,
                     ...(profileIdForSource ? { profile_id: profileIdForSource } : {}),
                 }
-            }]);
+            };
+
+            // Ensure the model is considered ready for persistence.
+            setIsLoaded(true);
+
+            // Update UI immediately, then persist to backend right away
+            const nextTables = [...(Array.isArray(tables) ? tables : []), newTable];
+            const currentRels = Array.isArray(relationships) ? relationships : [];
+            setTables(nextTables);
+            await persistModelNow(nextTables, currentRels);
             setShowSqlImportModal(false);
             setSelectedTable('');
         } catch (err) {
@@ -868,6 +1064,7 @@ const BIModelView = ({
                     body: JSON.stringify({
                         connection_id: connId,
                         table_name: table.source.table_name,
+                        pg_schema: table.source?.schema || 'public',
                         limit: MODEL_TABLE_PREVIEW_PAGE_SIZE,
                         page,
                     }),
@@ -983,9 +1180,10 @@ const BIModelView = ({
                     onDelete={onSqlDatasetDelete}
                     onRename={onSqlDatasetRename}
                     busyId={sqlDatasetBusyId}
-                    catalogTables={schemaTables}
+                    catalogTables={catalogTables}
                     catalogLoading={schemaLoading}
                     catalogError={schemaError}
+                    catalogSchemas={schemaOptions}
                     catalogSearch={catalogSearch}
                     onCatalogSearch={setCatalogSearch}
                     onCatalogAddTable={(tableName) => handleImportSqlTable(tableName)}
@@ -1433,13 +1631,21 @@ const BIModelView = ({
                                     <label className="bi-model-field">
                                         <span>PostgreSQL schema</span>
                                         <div className="bi-model-schema-row">
-                                            <input
+                                            <select
                                                 className="bi-model-input-sm"
                                                 value={pgSchema}
-                                                onChange={(e) => setPgSchema(e.target.value)}
-                                                placeholder="public"
-                                                aria-label="PostgreSQL schema name"
-                                            />
+                                                onChange={(e) => {
+                                                    const next = e.target.value;
+                                                    setPgSchema(next);
+                                                    // Keep schema query intent in sync with primary dropdown selection.
+                                                    setSelectedSchemas([next]);
+                                                }}
+                                                aria-label="PostgreSQL schema"
+                                            >
+                                                {schemaOptions.map((s) => (
+                                                    <option key={s} value={s}>{s}</option>
+                                                ))}
+                                            </select>
                                             <button
                                                 type="button"
                                                 className="bi-model-btn bi-model-btn-tiny"
@@ -1457,6 +1663,35 @@ const BIModelView = ({
                                                 Refresh tables
                                             </button>
                                         </div>
+                                        <div className="bi-model-saved-hint" style={{ marginTop: 6 }}>
+                                            Select one or more schemas
+                                        </div>
+                                        <div className="bi-model-schema-chip-list" aria-label="Selected schemas">
+                                            {schemaOptions.map((s) => {
+                                                const checked = selectedSchemas.includes(s);
+                                                return (
+                                                    <label key={`schema-chip-${s}`} className="bi-model-schema-chip">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={(e) => {
+                                                                const isChecked = e.target.checked;
+                                                                setSelectedSchemas((prev) => {
+                                                                    const curr = Array.isArray(prev) ? prev : [];
+                                                                    if (isChecked) {
+                                                                        if (curr.includes(s)) return curr;
+                                                                        return [...curr, s];
+                                                                    }
+                                                                    const next = curr.filter((x) => x !== s);
+                                                                    return next.length > 0 ? next : [pgSchema || 'public'];
+                                                                });
+                                                            }}
+                                                        />
+                                                        <span>{s}</span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
                                     </label>
                                     <label className="bi-model-field">
                                         <span>Table</span>
@@ -1467,8 +1702,8 @@ const BIModelView = ({
                                         >
                                             <option value="">{schemaLoading ? 'Loading…' : 'Select a table'}</option>
                                             {schemaTables.map((t) => (
-                                                <option key={t.table_name} value={t.table_name}>
-                                                    {t.table_name}
+                                                <option key={`${t.schema || 'public'}.${t.table_name}`} value={`${t.schema || 'public'}.${t.table_name}`}>
+                                                    {(t.schema || 'public')}.{t.table_name}
                                                     {t.row_count != null ? ` (~${t.row_count} rows)` : ''}
                                                 </option>
                                             ))}
@@ -1803,6 +2038,7 @@ const BIModelView = ({
                                             source: {
                                                 connection_id: selectedConn,
                                                 table_name: catalogTableInfo.table_name,
+                                                schema: catalogTableInfo.schema || 'public',
                                             },
                                             columns: Array.isArray(catalogTableInfo.columns)
                                                 ? catalogTableInfo.columns.map((col) => ({

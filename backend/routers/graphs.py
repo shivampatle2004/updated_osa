@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
-from typing import Optional
+from typing import Optional, Any
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import UploadedFile, GraphDefinition, FileColumn
@@ -209,6 +209,23 @@ def _build_graph_cache_key(file_id: str, request: schemas.GraphDataRequest) -> s
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
+
+def _has_non_empty_chart_payload(payload: Any) -> bool:
+    """True when cached graph payload contains usable points/rows."""
+    if not isinstance(payload, dict):
+        return False
+    labels = payload.get("labels")
+    if isinstance(labels, list) and len(labels) > 0:
+        return True
+    rows = payload.get("rows")
+    if isinstance(rows, list) and len(rows) > 0:
+        return True
+    table_rows = payload.get("rows")
+    table_cols = payload.get("columns")
+    if isinstance(table_rows, list) and isinstance(table_cols, list) and table_rows:
+        return True
+    return False
+
 def _get_cached_graph_response(cache_key: str):
     now = time.time()
     with _GRAPH_QUERY_CACHE_LOCK:
@@ -274,18 +291,18 @@ def get_graph_data(
             # Log the length of the cached data if it's a list/labels
             if isinstance(graph_def.cached_data, dict) and "labels" in graph_def.cached_data:
                 print(f"DEBUG: Cached data labels count: {len(graph_def.cached_data['labels'])}")
-            safe_cached = _json_safe(graph_def.cached_data)
-            _set_cached_graph_response(cache_key, safe_cached)
-            return safe_cached
+            if _has_non_empty_chart_payload(graph_def.cached_data):
+                safe_cached = _json_safe(graph_def.cached_data)
+                _set_cached_graph_response(cache_key, safe_cached)
+                return safe_cached
+            else:
+                print("DEBUG: Ignoring empty DB cache payload; recomputing graph data")
 
         # 2. Dynamic Calculation (Fallback or Custom Query)
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         
-        if file_record.status != "completed":
-            raise HTTPException(status_code=400, detail="File processing not complete")
-
         # Load data (will hit memory cache in DataProcessor)
         try:
             # Custom SQL dataset or merged model + uploads
@@ -299,6 +316,17 @@ def get_graph_data(
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error building model: {str(e)}")
+
+        # For DB-backed models (blank report + imported SQL tables), the base UploadedFile may still be
+        # pending/processing even though ModelEngine can already serve real data. Only block charts when
+        # we truly have no rows to aggregate yet.
+        if (df is None or df.empty) and file_record.status != "completed":
+            return {
+                "labels": [],
+                "values": [],
+                "processing": True,
+                "message": "Dataset is still preparing. Please retry in a moment.",
+            }
 
         # 3. Apply Time Intelligence filters if requested
         if has_filters:
@@ -329,6 +357,14 @@ def get_graph_data(
         safe_result = _json_safe(result)
         if not has_filters:
             _set_cached_graph_response(cache_key, safe_result)
+            # Persist cache into the graph definition for instant loads on reload.
+            try:
+                if graph_def is not None and _has_non_empty_chart_payload(safe_result):
+                    graph_def.cached_data = safe_result
+                    db.commit()
+            except Exception:
+                # Never fail the request due to cache persistence.
+                db.rollback()
         return safe_result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

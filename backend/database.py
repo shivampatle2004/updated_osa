@@ -9,7 +9,7 @@ load_dotenv()
 
 # Database configuration from environment variables
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "Sarvesh%4010")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Sarvesh10")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "onestopanalytics")
@@ -97,9 +97,13 @@ def init_db():
             except RuntimeError:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(seed_connectors())
-            if result is not None:
-                print("Connector registry synchronized with database.")
+            if loop.is_running():
+                asyncio.create_task(seed_connectors())
+                print("Connector registry synchronization scheduled.")
+            else:
+                result = loop.run_until_complete(seed_connectors())
+                if result is not None:
+                    print("Connector registry synchronized with database.")
         except Exception as se:
             print(f"WARNING: Connector seed failed (non-fatal): {se}")
     except Exception as e:

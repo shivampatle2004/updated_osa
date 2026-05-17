@@ -79,9 +79,31 @@ class GraphEngine:
         if missing_dimensions:
             return {"labels": [], "values": []}
 
+        # When the report contains multiple independent tables (no relationships), the merged
+        # dataframe can include rows where the selected fields are all null because they belong
+        # to another table block. Drop those rows so each visual reflects its own selected table.
+        def _is_blank(v):
+            if v is None:
+                return True
+            try:
+                if pd.isna(v):
+                    return True
+            except Exception:
+                pass
+            return str(v).strip() == ""
+
+        work_df = df.copy()
+
         # Graceful fallback: if no measure is provided, default to COUNT(*) by dimension.
         if not measures:
-            work_df = df.copy()
+            if dimensions:
+                keep_mask = work_df[dimensions].apply(
+                    lambda r: any(not _is_blank(v) for v in r.values), axis=1
+                )
+                work_df = work_df[keep_mask].copy()
+            if work_df.empty:
+                return {"labels": [], "values": []}
+
             for dim in dimensions:
                 work_df[dim] = work_df[dim].astype(str).replace("nan", "Unknown").fillna("Unknown")
 
@@ -130,7 +152,6 @@ class GraphEngine:
         named_aggs = {}
         measure_expressions = []
         normalized_measures = []
-        work_df = df.copy()
 
         has_time_intel = False
         time_intel_cols = []
@@ -152,7 +173,10 @@ class GraphEngine:
                 return {"labels": [], "values": []}
             source_column = column
             if agg_engine != "count":
-                numeric_series = pd.to_numeric(df[column], errors='coerce')
+                source_series = df[column]
+                if isinstance(source_series, pd.DataFrame):
+                    source_series = source_series.iloc[:, 0] if source_series.shape[1] > 0 else pd.Series(dtype="float64")
+                numeric_series = pd.to_numeric(source_series, errors='coerce')
                 if numeric_series.notna().sum() == 0:
                     # Fallback for non-numeric measures: count rows by dimension.
                     agg_engine = "count"
@@ -168,6 +192,18 @@ class GraphEngine:
                 "column": column,
                 "aggregation": agg_ui
             })
+
+        # Keep only rows where at least one selected dimension or measure has a value.
+        # This removes irrelevant rows from unrelated tables in "multi-table, no-relationship" mode.
+        measure_cols = [m.get("column") for m in measures if isinstance(m, dict) and m.get("column") in work_df.columns]
+        relevant_cols = [c for c in [*dimensions, *measure_cols] if c in work_df.columns]
+        if relevant_cols:
+            keep_mask = work_df[relevant_cols].apply(
+                lambda r: any(not _is_blank(v) for v in r.values), axis=1
+            )
+            work_df = work_df[keep_mask].copy()
+        if work_df.empty:
+            return {"labels": [], "values": []}
 
         for dim in dimensions:
             work_df[dim] = work_df[dim].astype(str).replace("nan", "Unknown").fillna("Unknown")
@@ -274,7 +310,10 @@ class GraphEngine:
             return {"labels": [], "values": []}
 
         agg_engine = GraphEngine._normalize_agg_to_engine(m0.get("aggregation", "sum"))
-        numeric_series = pd.to_numeric(df[col], errors="coerce")
+        raw_series = df[col]
+        if isinstance(raw_series, pd.DataFrame):
+            raw_series = raw_series.iloc[:, 0] if raw_series.shape[1] > 0 else pd.Series(dtype="float64")
+        numeric_series = pd.to_numeric(raw_series, errors="coerce")
 
         if agg_engine == "sum":
             val = numeric_series.sum()
@@ -496,7 +535,7 @@ class GraphEngine:
         values = []
         uncapped_total_points = 0
 
-        if graph_type in ["bar", "column", "stackedColumn", "pie", "line", "area", "donut", "radar", "treemap", "composed", "combination", "funnel", "radialBar", "kpiCard", "metricCard", "gauge", "heatmap", "sunburst", "boxPlot", "waterfall", "polarArea", "bubble", "bullet", "step", "map"]:
+        if graph_type in ["bar", "column", "stackedColumn", "pie", "line", "area", "donut", "radar", "treemap", "composed", "combination", "funnel", "radialBar", "kpiCard", "metricCard", "gauge", "heatmap", "sunburst", "boxPlot", "waterfall", "polarArea", "bubble", "bullet", "step", "map", "sankey"]:
             # Case 1: Just X with count (histogram-like categorical distribution)
             if aggregation == "count" or not y:
                 result = df[x].value_counts().reset_index()
@@ -519,7 +558,10 @@ class GraphEngine:
                 else:
                     # Guard against string concatenation/garbage output when Y is non-numeric
                     # (e.g. pandas "sum" on object columns concatenates strings).
-                    numeric_series = pd.to_numeric(df[y], errors='coerce')
+                    y_series = df[y]
+                    if isinstance(y_series, pd.DataFrame):
+                        y_series = y_series.iloc[:, 0] if y_series.shape[1] > 0 else pd.Series(dtype="float64")
+                    numeric_series = pd.to_numeric(y_series, errors='coerce')
                     if numeric_series.notna().sum() == 0:
                         result = df[x].value_counts().reset_index()
                         result.columns = [x, "count"]
@@ -601,13 +643,23 @@ class GraphEngine:
             else:
                 try:
                     result = df.groupby(x)[y].agg(['min', 'max']).reset_index()
-                    labels = [str(v) for v in result[x].tolist()]
-                    mins = result['min'].tolist()
-                    maxs = result['max'].tolist()
-                    values = [[mins[i], maxs[i]] for i in range(len(mins))]
+                    if result is None or result.empty:
+                        # Robust fallback for sparse/null grouping columns.
+                        vc = df[x].fillna("Unknown").astype(str).value_counts().reset_index()
+                        vc.columns = [x, "count"]
+                        labels = [str(v) for v in vc[x].tolist()]
+                        values = [[0, c] for c in vc["count"].tolist()]
+                    else:
+                        labels = [str(v) for v in result[x].tolist()]
+                        mins = result['min'].tolist()
+                        maxs = result['max'].tolist()
+                        values = [[mins[i], maxs[i]] for i in range(len(mins))]
                 except Exception:
-                    labels = []
-                    values = []
+                    # Keep chart renderable instead of showing "No data available".
+                    vc = df[x].fillna("Unknown").astype(str).value_counts().reset_index()
+                    vc.columns = [x, "count"]
+                    labels = [str(v) for v in vc[x].tolist()]
+                    values = [[0, c] for c in vc["count"].tolist()]
                     
         elif graph_type == "table":
             if not x:
@@ -634,7 +686,10 @@ class GraphEngine:
             import numpy as np
             
             # Drop NaNs and ensure numeric
-            series = pd.to_numeric(df[x], errors='coerce').dropna()
+            x_series = df[x]
+            if isinstance(x_series, pd.DataFrame):
+                x_series = x_series.iloc[:, 0] if x_series.shape[1] > 0 else pd.Series(dtype="float64")
+            series = pd.to_numeric(x_series, errors='coerce').dropna()
             
             # If the user selected a completely non-numeric column, try to find *any* numeric column 
             # so the chart doesn't just show 'No data available' immediately.

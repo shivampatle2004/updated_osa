@@ -13,6 +13,8 @@ import * as XLSX from 'xlsx';
 
 // BI Components
 import BIRibbon from './BIRibbon';
+import BIAIInsightsPanel from './BIAIInsightsPanel';
+import { extractChartContext, pickBestVisual } from '../utils/aiChartContext';
 import BIInsightsPanel from './BIInsightsPanel';
 import BIDashboardCanvas from './BIDashboardCanvas';
 import BIRightPanes from './BIRightPanes';
@@ -132,9 +134,11 @@ const BIWorkspace = ({
   }, []);
 
   const reportRef = useRef(null);
+  const presentContainerRef = useRef(null);
   const newFileInputRef = useRef(null);
   const excelFileInputRef = useRef(null);
   const imageInputRef = useRef(null);
+  const reportBgColorInputRef = useRef(null);
   
   // -- State: Core Data --
   const [fileName, setFileName] = useState(initialFileName || 'Untitled Report');
@@ -183,7 +187,21 @@ const BIWorkspace = ({
   const [activeMeasure, setActiveMeasure] = useState(null);
   const [clipboardVisual, setClipboardVisual] = useState(null);
   const [formatPainterVisualId, setFormatPainterVisualId] = useState(null);
-  
+
+  // -- State: AI Insights --
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiTask, setAiTask] = useState('explain'); // explain | trend | anomalies | rootCause | summary | nextSteps | story | ask
+  const [aiMode, setAiMode] = useState(() => {
+    try { return localStorage.getItem('osa_ai_mode') || 'ceo'; } catch (_) { return 'ceo'; }
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState('');
+  const [aiChatHistory, setAiChatHistory] = useState([]);
+  const aiPanelOpenRef = useRef(false);
+  useEffect(() => { aiPanelOpenRef.current = aiPanelOpen; }, [aiPanelOpen]);
+  useEffect(() => { try { localStorage.setItem('osa_ai_mode', aiMode); } catch (_) {} }, [aiMode]);
+
   // -- State: Panels --
   const [isInsightsCollapsed, setIsInsightsCollapsed] = useState(true);
   const [isRightPanesCollapsed, setIsRightPanesCollapsed] = useState(false);
@@ -233,6 +251,7 @@ const BIWorkspace = ({
   const [isExporting, setIsExporting] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [uploadJob, setUploadJob] = useState({ active: false, phase: 'idle', progress: 0, message: '' });
+  const [isFieldsRefreshing, setIsFieldsRefreshing] = useState(false);
   const [showAddFileModal, setShowAddFileModal] = useState(false);
   /** True after File → Blank report until data is loaded for the new report or user cancels. Hides the previous report UI. */
   const [isNewReportDraft, setIsNewReportDraft] = useState(false);
@@ -410,6 +429,27 @@ const BIWorkspace = ({
     setRemoteProfileId(profileId || '');
     setActiveView('model');
     setShowSqlImportModal(true);
+  }, []);
+
+  const handleRemoteDbDisconnected = useCallback(({ profileId, closedConnectionIds }) => {
+    setRemoteConnectionId((prev) => {
+      if (!prev) return prev;
+      if (Array.isArray(closedConnectionIds) && closedConnectionIds.includes(prev)) return '';
+      return prev;
+    });
+    setRemoteProfileId((prev) => (prev && profileId && prev === profileId ? '' : prev));
+    try {
+      const cid = sessionStorage.getItem('osa_remote_connection_id');
+      if (cid && Array.isArray(closedConnectionIds) && closedConnectionIds.includes(cid)) {
+        sessionStorage.removeItem('osa_remote_connection_id');
+      }
+      const pid = sessionStorage.getItem('osa_remote_profile_id');
+      if (pid && profileId && pid === profileId) {
+        sessionStorage.removeItem('osa_remote_profile_id');
+      }
+    } catch (_) {
+      /* ignore */
+    }
   }, []);
 
   const handleOpenConnectorForm = async (engine) => {
@@ -743,13 +783,26 @@ const BIWorkspace = ({
 
   const applyVisualUpdate = useCallback((visualId, updates) => {
     const startedAt = performance.now();
+    const nextOptions = updates?.options;
+    const fieldWellChanged = Boolean(
+      nextOptions &&
+      typeof nextOptions === 'object' &&
+      (
+        Object.prototype.hasOwnProperty.call(nextOptions, 'dimension_fields') ||
+        Object.prototype.hasOwnProperty.call(nextOptions, 'measure_fields') ||
+        Object.prototype.hasOwnProperty.call(nextOptions, 'measure_expressions') ||
+        Object.prototype.hasOwnProperty.call(nextOptions, 'axis_mapping') ||
+        Object.prototype.hasOwnProperty.call(nextOptions, 'visualization_config')
+      )
+    );
     const shouldInvalidateCache = Boolean(
       updates &&
       (
         Object.prototype.hasOwnProperty.call(updates, 'x_axis') ||
         Object.prototype.hasOwnProperty.call(updates, 'y_axis') ||
         Object.prototype.hasOwnProperty.call(updates, 'aggregation') ||
-        Object.prototype.hasOwnProperty.call(updates, 'graph_type')
+        Object.prototype.hasOwnProperty.call(updates, 'graph_type') ||
+        fieldWellChanged
       )
     );
 
@@ -1674,12 +1727,26 @@ const BIWorkspace = ({
 
           if (addRes.ok) {
             const addPayload = await addRes.json();
+            setUploadJob({
+              active: true,
+              phase: 'syncing_model',
+              progress: 82,
+              message: 'Syncing table to model fields...',
+            });
             if (addPayload.tables) {
               setModelTables(addPayload.tables);
             }
-            // Ask for data rebuild so components see the extra columns
-            fetchInitialData(true);
-            loadDatasetForFeatures(1);
+            // Ask for data rebuild so components see the extra columns/dimensions/measures.
+            await fetchInitialData(true);
+            await loadDatasetForFeatures(1);
+            try {
+              const diagnosticsRes = await fetch(`/api/files/${fileId}/model/diagnostics`);
+              if (diagnosticsRes.ok) {
+                setModelDiagnostics(await diagnosticsRes.json());
+              }
+            } catch (_) {
+              /* ignore diagnostics refresh errors */
+            }
             setShowAddFileModal(false);
             if (newFileInputRef.current) newFileInputRef.current.value = '';
             // Close any inner modal if open
@@ -1689,10 +1756,12 @@ const BIWorkspace = ({
           } else {
             console.error('Failed to add file to model:', await addRes.text());
             alert('File uploaded, but failed to link it to the current model.');
+            setUploadJob({ active: false, phase: 'error', progress: 100, message: '' });
           }
         } catch (addErr) {
           console.error('Error adding file to model:', addErr);
           alert('File uploaded, but there was an error linking it to the current model.');
+          setUploadJob({ active: false, phase: 'error', progress: 100, message: '' });
         }
       }
 
@@ -1776,6 +1845,137 @@ const BIWorkspace = ({
     }
   };
 
+  // -- Handlers: AI Insights --
+  const AI_TASK_ENDPOINT = {
+    explain: '/api/ai/explain-chart',
+    trend: '/api/ai/explain-trend',
+    anomalies: '/api/ai/anomaly-detection',
+    rootCause: '/api/ai/root-cause',
+    summary: '/api/ai/generate-summary',
+    nextSteps: '/api/ai/next-steps',
+    story: '/api/ai/story',
+  };
+
+  const buildAIChartContext = useCallback(() => {
+    const pageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
+    const selected = activeVisualId ? pageGraphs.find((g) => g.id === activeVisualId) : null;
+    const target = selected || pickBestVisual(pageGraphs);
+    if (!target) return { ctx: null, fallback: false };
+    const pageName = (pages || []).find((p) => p.id === activePageId)?.name || '';
+    const ctx = extractChartContext(target, { pageName });
+    return { ctx, fallback: !selected, target };
+  }, [graphs, activePageId, activeVisualId, pages, getGraphPageId]);
+
+  const runAIInsight = useCallback(async (task, opts = {}) => {
+    const endpoint = AI_TASK_ENDPOINT[task];
+    if (!endpoint) return;
+    const { ctx } = buildAIChartContext();
+    if (!ctx) {
+      setAiPanelOpen(true);
+      setAiTask(task);
+      setAiResult(null);
+      setAiError('No visual is available on this page. Add a chart, then try again.');
+      return;
+    }
+    setAiPanelOpen(true);
+    setAiTask(task);
+    setAiLoading(true);
+    setAiError('');
+    if (!opts.preserveResult) setAiResult(null);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: ctx, mode: aiMode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      setAiResult(data);
+    } catch (e) {
+      setAiError(e?.message || 'Could not reach the AI service.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [buildAIChartContext, aiMode]);
+
+  const runAIAsk = useCallback(async (question) => {
+    const { ctx } = buildAIChartContext();
+    if (!ctx) {
+      setAiPanelOpen(true);
+      setAiTask('ask');
+      setAiError('No visual is available to ask about.');
+      return;
+    }
+    setAiPanelOpen(true);
+    setAiTask('ask');
+    setAiError('');
+    setAiChatHistory((prev) => [...prev, { role: 'user', content: question }]);
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: ctx,
+          question,
+          mode: aiMode,
+          history: aiChatHistory.slice(-10),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      const answer = data?.answer || data?.summary || 'I could not generate an answer.';
+      setAiChatHistory((prev) => [...prev, { role: 'assistant', content: answer }]);
+      setAiResult(data);
+    } catch (e) {
+      setAiError(e?.message || 'AI request failed.');
+      setAiChatHistory((prev) => [...prev, { role: 'assistant', content: 'Sorry — I could not answer that just now.' }]);
+    } finally {
+      setAiLoading(false);
+    }
+  }, [buildAIChartContext, aiMode, aiChatHistory]);
+
+  const exportAIReport = useCallback(() => {
+    if (!aiResult) {
+      setAiPanelOpen(true);
+      setAiError('Run an insight first, then export.');
+      return;
+    }
+    const lines = [];
+    lines.push(`# AI Insights — ${aiResult.title || 'Visual'}`);
+    lines.push(`_Mode: ${aiResult.mode || aiMode}_`);
+    lines.push('');
+    if (aiResult.headline) { lines.push('## Headline'); lines.push(aiResult.headline); lines.push(''); }
+    if (aiResult.narrative) { lines.push('## Narrative'); lines.push(aiResult.narrative); lines.push(''); }
+    if (aiResult.summary && aiResult.summary !== aiResult.narrative) {
+      lines.push('## Summary'); lines.push(aiResult.summary); lines.push('');
+    }
+    if (Array.isArray(aiResult.trends) && aiResult.trends.length) {
+      lines.push('## Trends');
+      aiResult.trends.forEach((t) => lines.push(`- ${t.summary}`));
+      lines.push('');
+    }
+    if (Array.isArray(aiResult.anomalies) && aiResult.anomalies.length) {
+      lines.push('## Anomalies');
+      aiResult.anomalies.forEach((a) => lines.push(`- ${a.summary}`));
+      lines.push('');
+    }
+    if (aiResult.rootCause) { lines.push('## Root Cause'); lines.push(aiResult.rootCause); lines.push(''); }
+    if (Array.isArray(aiResult.recommendations) && aiResult.recommendations.length) {
+      lines.push('## Recommendations');
+      aiResult.recommendations.forEach((r, i) => lines.push(`${i + 1}. ${r}`));
+      lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safe = (aiResult.title || 'ai-report').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
+    a.href = url;
+    a.download = `${safe}-${aiTask}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [aiResult, aiMode, aiTask]);
+
   // -- Handlers: Ribbon Actions --
   const handleRibbonAction = async (actionId, ...args) => {
     const patchModelConfig = async (partial) => {
@@ -1818,26 +2018,50 @@ const BIWorkspace = ({
 
     switch (actionId) {
       case 'file_save':
-        handleSaveLayout();
+        console.log('💾 [Ribbon] Triggering save layout...');
+        if (!fileId) {
+          alert('Please create a new blank report or open an existing file first.');
+          break;
+        }
+        await handleSaveLayout();
         break;
       case 'file_save_as': {
-        const newName = prompt('Save report as:', fileName || 'Untitled Report');
+        if (!fileId) {
+          alert('Please create a new blank report or open an existing file first.');
+          break;
+        }
+        let defaultName = fileName || 'Untitled Report';
+        if (!defaultName.toLowerCase().endsWith('.osa')) {
+          defaultName += '.osa';
+        }
+        console.log('📄 [Ribbon] Save As triggered. Default name:', defaultName);
+        let newName = prompt('Save report as:', defaultName);
+        
         if (newName && fileId) {
+          if (!newName.toLowerCase().endsWith('.osa')) {
+            newName += '.osa';
+          }
+          console.log('📄 [Ribbon] Proceeding with Save As. New name:', newName);
           try {
             // Ensure latest in-memory changes (graphs + page tabs) are persisted
             // before cloning into a new report.
             const didSaveCurrent = await handleSaveLayout({ silent: true });
             if (!didSaveCurrent) {
+              console.error('❌ [Ribbon] Could not save current report state before Save As.');
               alert('Could not save current report state before Save As.');
               break;
             }
+            
+            console.log('📄 [Ribbon] Current state saved. Sending save-as request for:', newName);
             const res = await fetch(`/api/files/${fileId}/save-as`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ fileName: newName })
             });
+            
             if (res.ok) {
               const data = await res.json();
+              console.log('✅ [Ribbon] Save As successful. New file ID:', data.file_id);
               updateRecentFiles(data.file_id, newName);
               if (onOpenFile) {
                 onOpenFile({ id: data.file_id, fileName: newName });
@@ -1845,10 +2069,17 @@ const BIWorkspace = ({
                 navigate(`/?fileId=${data.file_id}&fileName=${encodeURIComponent(newName)}`, { replace: true });
               }
               alert(`Report saved as "${newName}"`);
+            } else {
+              const errData = await res.json();
+              console.error('❌ [Ribbon] Save As API failed:', errData);
+              alert(`Failed to save report: ${errData.detail || 'Unknown error'}`);
             }
           } catch (err) {
-            console.error('Save As failed:', err);
+            console.error('❌ [Ribbon] Save As failed with exception:', err);
+            alert('An error occurred during Save As.');
           }
+        } else {
+          console.log('📄 [Ribbon] Save As cancelled or missing requirements.');
         }
         break;
       }
@@ -1932,6 +2163,55 @@ const BIWorkspace = ({
       case 'format_painter': {
         if (!activeVisualId) break;
         setFormatPainterVisualId(activeVisualId);
+        break;
+      }
+      // ── AI Insights ──
+      case 'ai_explain':
+        await runAIInsight('explain');
+        break;
+      case 'ai_trend':
+        await runAIInsight('trend');
+        break;
+      case 'ai_anomalies':
+        await runAIInsight('anomalies');
+        break;
+      case 'ai_root_cause':
+        await runAIInsight('rootCause');
+        break;
+      case 'ai_summary':
+        await runAIInsight('summary');
+        break;
+      case 'ai_next_steps':
+        await runAIInsight('nextSteps');
+        break;
+      case 'ai_story':
+        await runAIInsight('story');
+        break;
+      case 'ai_export':
+        exportAIReport();
+        break;
+      case 'ai_ask':
+      case 'ai_chat': {
+        setAiPanelOpen(true);
+        setAiTask('ask');
+        setAiError('');
+        // If no chat yet, kick off with a default explain so user has context
+        if ((aiChatHistory || []).length === 0 && !aiResult) {
+          await runAIInsight('explain', { preserveResult: true });
+        }
+        break;
+      }
+      case 'ai_mode_ceo':
+      case 'ai_mode_technical':
+      case 'ai_mode_simple':
+      case 'ai_mode_financial':
+      case 'ai_mode_sales': {
+        const next = actionId.replace('ai_mode_', '');
+        setAiMode(next);
+        // If a result is on screen, regenerate with the new mode
+        if (aiPanelOpenRef.current && aiTask && aiTask !== 'ask') {
+          await runAIInsight(aiTask);
+        }
         break;
       }
       case 'sql':
@@ -2306,8 +2586,8 @@ const BIWorkspace = ({
         const newVisual = {
           id: newId,
           graph_type: 'sparkline',
-          x_axis: schema[0]?.column_name || '',
-          y_axis: schema.find(s => isNumericType(s?.data_type))?.column_name || '',
+        x_axis: '',
+        y_axis: '',
           options: {
             title: 'Sparkline Trend',
             size: 'small',
@@ -2359,6 +2639,19 @@ const BIWorkspace = ({
       case 'view_actual':
         setPageViewMode('actual');
         break;
+      case 'view_present': {
+        // Fullscreen the center report area so page tabs remain visible in Present mode.
+        const target = presentContainerRef.current || reportRef.current;
+        if (!target) break;
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => {});
+          break;
+        }
+        target.requestFullscreen?.().catch(() => {
+          alert('Unable to start present mode in this browser.');
+        });
+        break;
+      }
       case 'mobile_layout':
         setIsMobileLayout(prev => !prev);
         break;
@@ -2381,16 +2674,11 @@ const BIWorkspace = ({
         break;
       }
       case 'set_report_background': {
-        const current = String(reportBackgroundColor || '#ffffff');
-        const nextColor = prompt('Enter report background color (hex):', current);
-        if (nextColor === null) break;
-        const trimmed = nextColor.trim();
-        const hexColor = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-        if (!hexColor.test(trimmed)) {
-          alert('Please enter a valid hex color like #744EC2.');
-          break;
+        // Use native color picker for easier visual selection.
+        if (reportBgColorInputRef.current) {
+          reportBgColorInputRef.current.value = String(reportBackgroundColor || '#ffffff');
+          reportBgColorInputRef.current.click();
         }
-        setReportBackgroundColor(trimmed);
         break;
       }
       case 'set_report_bg_white':
@@ -2416,8 +2704,6 @@ const BIWorkspace = ({
 
   const handleAddVisual = (type, dropPosition = null) => {
     const newId = uniqueVisualId('graph');
-    const defaultX = schema[0]?.column_name || '';
-    const defaultY = schema.find(s => isNumericType(s?.data_type))?.column_name || '';
     const defaultWidth = 520;
     const defaultHeight = 360;
     const fallbackOffset = (graphs.length % 8) * 24;
@@ -2425,8 +2711,8 @@ const BIWorkspace = ({
     const newVisual = {
       id: newId,
       graph_type: type,
-      x_axis: defaultX,
-      y_axis: defaultY,
+      x_axis: '',
+      y_axis: '',
       options: { 
         title: `New ${type.toUpperCase()}`,
         size: 'medium',
@@ -2851,11 +3137,12 @@ const BIWorkspace = ({
 
       updateRecentFiles(fileId, fileName);
       if (!silent) {
+        console.log('✅ [SaveLayout] Layout saved successfully for file:', fileId);
         alert("Layout saved!");
       }
       return true;
     } catch (err) {
-      console.error("Save failed:", err);
+      console.error("❌ [SaveLayout] Save failed for file:", fileId, err);
       return false;
     }
   }, [fileId, graphs, pages, activePageId, fileName, fileDetails?.status, reportHeaderText, reportBackgroundColor]);
@@ -3283,6 +3570,19 @@ const BIWorkspace = ({
         onChange={handleInsertImage}
         accept="image/*"
       />
+      <input
+        type="color"
+        ref={reportBgColorInputRef}
+        style={{ display: 'none' }}
+        value={reportBackgroundColor || '#ffffff'}
+        onChange={(e) => {
+          const next = String(e.target.value || '').trim();
+          if (/^#[0-9a-fA-F]{6}$/.test(next)) {
+            setReportBackgroundColor(next);
+          }
+        }}
+        aria-label="Select report background color"
+      />
       {/* Add File Modal (Blank Report) */}
       <AddFileModal
         isOpen={showAddFileModal}
@@ -3645,6 +3945,7 @@ const BIWorkspace = ({
         dateFilter={dateFilter}
         setDateFilter={setDateFilter}
         hideSecurityTools={shareLinkLocked}
+        aiMode={aiMode}
       />
       )}
 
@@ -3711,9 +4012,9 @@ const BIWorkspace = ({
             </div>
           )}
           
-          <div className="bi-view-icon bi-home-icon" onClick={() => onGoHome ? onGoHome() : navigate('/')} title="Go Home">
+          {/* <div className="bi-view-icon bi-home-icon" onClick={() => onGoHome ? onGoHome() : navigate('/')} title="Go Home">
             <Home size={20} />
-          </div>
+          </div> */}
         </div>
 
         {isNewReportDraft ? (
@@ -3747,9 +4048,23 @@ const BIWorkspace = ({
               showSqlImportModal={showSqlImportModal}
               setShowSqlImportModal={setShowSqlImportModal}
               onModelUpdate={async () => {
-                await fetchInitialData(true);
-                setDatasetPage(1);
-                await loadDatasetForFeatures(1);
+                const startedAt = Date.now();
+                setIsFieldsRefreshing(true);
+                try {
+                  await fetchInitialData(true);
+                  setDatasetPage(1);
+                  await loadDatasetForFeatures(1);
+                } finally {
+                  // Avoid spinner flicker on very fast refreshes.
+                  const elapsed = Date.now() - startedAt;
+                  const minMs = 800;
+                  const waitMs = elapsed < minMs ? (minMs - elapsed) : 0;
+                  if (waitMs > 0) {
+                    setTimeout(() => setIsFieldsRefreshing(false), waitMs);
+                  } else {
+                    setIsFieldsRefreshing(false);
+                  }
+                }
               }}
               initialTables={modelTables}
               initialRelationships={modelRelationships}
@@ -3797,6 +4112,8 @@ const BIWorkspace = ({
               activeConnectionId={remoteConnectionId}
               activeProfileId={remoteProfileId}
               onConnected={handleRemoteDbConnected}
+              onDisconnected={handleRemoteDbDisconnected}
+              onMoreConnectors={() => setShowConnectorsModal(true)}
               isGuest={isGuest}
             />
           </div>
@@ -3898,7 +4215,7 @@ const BIWorkspace = ({
 
               {/* Center Panel: Dashboard Canvas */}
               <Panel defaultSize={60} minSize={30}>
-                <div className="bi-center-column">
+                <div ref={presentContainerRef} className="bi-center-column">
                   {/* Formula Bar */}
                   {showMeasureBar && (
                     <div className="bi-measure-bar">
@@ -3956,9 +4273,35 @@ const BIWorkspace = ({
                         reportTheme={reportTheme}
                         reportHeaderText={reportHeaderText}
                         reportBackgroundColor={reportBackgroundColor}
-                        onUpdateReportHeader={(nextHeader) => {
+                        onUpdateReportHeader={async (nextHeader) => {
                           const trimmed = (nextHeader || '').trim();
-                          setReportHeaderText(trimmed || REPORT_HEADER_PLACEHOLDER);
+                          if (!trimmed) {
+                            setReportHeaderText(REPORT_HEADER_PLACEHOLDER);
+                            return;
+                          }
+                          
+                          setReportHeaderText(trimmed);
+                          
+                          // If we have a fileId and it's not a draft, also update the workspace name (fileName)
+                          if (fileId && !isNewReportDraft) {
+                            console.log(`🏷️ [Canvas] Syncing report header to workspace name: ${trimmed}`);
+                            setFileName(trimmed);
+                            try {
+                              const res = await fetch(`/api/files/${fileId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ fileName: trimmed })
+                              });
+                              if (res.ok) {
+                                console.log('✅ [Canvas] Workspace renamed successfully');
+                                updateRecentFiles(fileId, trimmed);
+                              } else {
+                                console.error('❌ [Canvas] Rename API failed');
+                              }
+                            } catch (err) {
+                              console.error('❌ [Canvas] Rename failed:', err);
+                            }
+                          }
                         }}
                       />
                     </div>
@@ -4257,6 +4600,7 @@ const BIWorkspace = ({
                           setSelectedData({ kind: 'field', columnName: col.column_name });
                         }
                       }}
+                      isFieldsRefreshing={isFieldsRefreshing}
                     />
                   </Panel>
                 </>
@@ -4504,6 +4848,35 @@ const BIWorkspace = ({
         isOpen={showConnectorsModal}
         onClose={() => setShowConnectorsModal(false)}
         onConnect={handleOpenConnectorForm}
+      />
+      <BIAIInsightsPanel
+        open={aiPanelOpen}
+        onClose={() => setAiPanelOpen(false)}
+        task={aiTask}
+        setTask={(t) => {
+          setAiTask(t);
+          if (t === 'ask') return;
+          // Auto-run on tab switch only if we have a visual
+          const { ctx } = buildAIChartContext();
+          if (ctx) runAIInsight(t);
+        }}
+        mode={aiMode}
+        setMode={(m) => {
+          setAiMode(m);
+          if (aiTask && aiTask !== 'ask') runAIInsight(aiTask);
+        }}
+        loading={aiLoading}
+        result={aiResult}
+        error={aiError}
+        selectedVisualTitle={(() => {
+          const { ctx } = buildAIChartContext();
+          return ctx?.title || '';
+        })()}
+        hasSelectedVisual={Boolean(buildAIChartContext().ctx)}
+        onRunTask={runAIInsight}
+        onAsk={runAIAsk}
+        chatHistory={aiChatHistory}
+        onClearChat={() => { setAiChatHistory([]); setAiResult(null); }}
       />
       <BIConnectionConfigModal
         isOpen={showConfigModal}

@@ -7,6 +7,7 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
   const [searchQuery, setSearchQuery] = useState('');
   const [selected, setSelected] = useState(null);
   const [remoteSchema, setRemoteSchema] = useState('public');
+  const [remoteSchemaOptions, setRemoteSchemaOptions] = useState(['public']);
   const [remoteTables, setRemoteTables] = useState([]);
   const [isLoadingRemoteTables, setIsLoadingRemoteTables] = useState(false);
   const [remoteTablesError, setRemoteTablesError] = useState('');
@@ -27,6 +28,7 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
         const q = new URLSearchParams({
           connection_id: connectionId,
           pg_schema: (remoteSchema || 'public').trim() || 'public',
+          pg_schemas: (remoteSchema || 'public').trim() || 'public',
           include_row_counts: 'true',
         });
         const res = await fetch(`/api/db/schema?${q.toString()}`);
@@ -49,6 +51,33 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
     loadRemoteTables();
     return () => { cancelled = true; };
   }, [activeConnectionId, remoteSchema]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSchemas = async () => {
+      const connectionId = String(activeConnectionId || '').trim();
+      if (!connectionId) {
+        setRemoteSchemaOptions(['public']);
+        return;
+      }
+      try {
+        const q = new URLSearchParams({ connection_id: connectionId });
+        const res = await fetch(`/api/db/schemas?${q.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.message || 'Failed to load schemas');
+        if (cancelled) return;
+        const schemas = Array.isArray(data.schemas) && data.schemas.length > 0 ? data.schemas : ['public'];
+        setRemoteSchemaOptions(schemas);
+        setRemoteSchema((prev) => (schemas.includes(prev) ? prev : schemas[0]));
+      } catch (_) {
+        if (cancelled) return;
+        setRemoteSchemaOptions(['public']);
+        setRemoteSchema('public');
+      }
+    };
+    loadSchemas();
+    return () => { cancelled = true; };
+  }, [activeConnectionId]);
 
   const catalogs = useMemo(() => {
     const output = {};
@@ -151,6 +180,17 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Search catalog tables"
           />
+        </div>
+        <div className="bi-catalog-search">
+          <select
+            value={remoteSchema}
+            onChange={(e) => setRemoteSchema(e.target.value)}
+            aria-label="Select schema"
+          >
+            {remoteSchemaOptions.map((schemaName) => (
+              <option key={schemaName} value={schemaName}>{schemaName}</option>
+            ))}
+          </select>
         </div>
 
         <div className="bi-catalog-tree">

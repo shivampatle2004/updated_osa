@@ -82,6 +82,7 @@ class QueryRequest(BaseModel):
     connection_id: str
     query: Optional[str] = None
     table_name: Optional[str] = None
+    pg_schema: Optional[str] = None
     limit: int = Field(default=100, ge=1, le=1000)
     page: int = Field(default=1, ge=1)
 
@@ -93,20 +94,33 @@ class BuildQueryRequest(BaseModel):
     aggregations: List[str] = []
 
 
-def _safe_identifier(name: str) -> bool:
-    return bool(name and SAFE_IDENTIFIER.fullmatch(name))
+def _safe_identifier(name: str, allow_qualified: bool = False) -> bool:
+    if not name:
+        return False
+    raw = str(name).strip()
+    if not raw:
+        return False
+    if allow_qualified and "." in raw:
+        parts = [p.strip() for p in raw.split(".") if p.strip()]
+        if len(parts) < 2:
+            return False
+        return all(bool(SAFE_IDENTIFIER.fullmatch(p)) for p in parts)
+    return bool(SAFE_IDENTIFIER.fullmatch(raw))
 
 
 def _quote_ident(name: str, db_type: str) -> str:
-    if not _safe_identifier(name):
+    if not _safe_identifier(name, allow_qualified=True):
         raise HTTPException(status_code=400, detail=f"Unsafe identifier: {name}")
+    parts = [p.strip() for p in str(name).split(".") if p.strip()]
     if db_type == "mysql":
-        return f"`{name}`"
-    return f'"{name}"'
+        return ".".join(f"`{p}`" for p in parts)
+    if db_type == "mssql":
+        return ".".join(f"[{p}]" for p in parts)
+    return ".".join(f'"{p}"' for p in parts)
 
 
 def _build_table_query(table_name: str, limit: int, offset: int, db_type: str) -> str:
-    if not _safe_identifier(table_name):
+    if not _safe_identifier(table_name, allow_qualified=True):
         raise HTTPException(status_code=400, detail="Invalid table name")
     q_table = _quote_ident(table_name, db_type)
     if db_type == "mssql":
@@ -132,6 +146,23 @@ def _pg_table_names_from_information_schema(engine, schema: str) -> List[str]:
                 """
             ),
             {"schema": schema},
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _pg_list_accessible_schemas(engine) -> List[str]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+                  AND schema_name NOT LIKE 'pg_toast%'
+                  AND schema_name NOT LIKE 'pg_temp_%'
+                ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name
+                """
+            )
         ).fetchall()
     return [r[0] for r in rows]
 
@@ -167,6 +198,7 @@ def _build_schema_tables(
     rec,
     pg_schema: str,
     include_row_counts: bool,
+    include_relationships: bool = False,
 ) -> List[dict]:
     inspector = sqlalchemy.inspect(engine)
     db_type = (rec.db_type or "postgresql").lower()
@@ -177,6 +209,7 @@ def _build_schema_tables(
         tables = []
         for table_name in table_names:
             cols = inspector.get_columns(table_name, schema=pg_schema)
+            rels = inspector.get_foreign_keys(table_name, schema=pg_schema) if include_relationships else []
             entry = {
                 "table_name": table_name,
                 "schema": pg_schema,
@@ -187,6 +220,16 @@ def _build_schema_tables(
                         "nullable": bool(c.get("nullable", True)),
                     }
                     for c in cols
+                ],
+                "relationships": [
+                    {
+                        "constrained_columns": fk.get("constrained_columns") or [],
+                        "referred_schema": fk.get("referred_schema") or pg_schema,
+                        "referred_table": fk.get("referred_table"),
+                        "referred_columns": fk.get("referred_columns") or [],
+                    }
+                    for fk in rels
+                    if fk.get("referred_table")
                 ],
             }
             if include_row_counts and table_name in row_counts:
@@ -200,6 +243,7 @@ def _build_schema_tables(
         tables = []
         for table_name in table_names:
             cols = inspector.get_columns(table_name, schema=schema_name)
+            rels = inspector.get_foreign_keys(table_name, schema=schema_name) if include_relationships else []
             tables.append({
                 "table_name": table_name,
                 "schema": schema_name,
@@ -211,6 +255,16 @@ def _build_schema_tables(
                     }
                     for c in cols
                 ],
+                "relationships": [
+                    {
+                        "constrained_columns": fk.get("constrained_columns") or [],
+                        "referred_schema": fk.get("referred_schema") or schema_name,
+                        "referred_table": fk.get("referred_table"),
+                        "referred_columns": fk.get("referred_columns") or [],
+                    }
+                    for fk in rels
+                    if fk.get("referred_table")
+                ],
             })
         return tables
 
@@ -220,6 +274,7 @@ def _build_schema_tables(
     tables = []
     for table_name in table_names:
         cols = inspector.get_columns(table_name, schema=mssql_schema)
+        rels = inspector.get_foreign_keys(table_name, schema=mssql_schema) if include_relationships else []
         tables.append({
             "table_name": table_name,
             "schema": mssql_schema,
@@ -231,8 +286,38 @@ def _build_schema_tables(
                 }
                 for c in cols
             ],
+            "relationships": [
+                {
+                    "constrained_columns": fk.get("constrained_columns") or [],
+                    "referred_schema": fk.get("referred_schema") or mssql_schema,
+                    "referred_table": fk.get("referred_table"),
+                    "referred_columns": fk.get("referred_columns") or [],
+                }
+                for fk in rels
+                if fk.get("referred_table")
+            ],
         })
     return tables
+
+
+def _normalize_pg_schemas(pg_schema: Optional[str], pg_schemas: Optional[str]) -> List[str]:
+    values: List[str] = []
+    if pg_schemas:
+        values.extend([s.strip() for s in str(pg_schemas).split(",") if s.strip()])
+    if pg_schema:
+        values.append(str(pg_schema).strip())
+    if not values:
+        values.append("public")
+
+    out: List[str] = []
+    seen = set()
+    for s in values:
+        if not s:
+            continue
+        if s not in seen:
+            out.append(s)
+            seen.add(s)
+    return out or ["public"]
 
 
 @router.post("/connect")
@@ -386,15 +471,22 @@ def get_connection_schema(
     connection_id: str,
     refresh: bool = False,
     pg_schema: str = "public",
+    pg_schemas: Optional[str] = None,
     include_row_counts: bool = False,
+    include_relationships: bool = False,
 ):
     try:
         if refresh:
             remote_db_manager.invalidate_schema_cache(connection_id)
 
         engine, rec = remote_db_manager.get_engine(connection_id)
-        pg_norm = pg_schema.strip() or "public"
-        cache_subkey = f"pg:{pg_norm}" if rec.db_type == "postgresql" else None
+        schema_list = _normalize_pg_schemas(pg_schema, pg_schemas)
+        is_postgres = (rec.db_type or "").lower() == "postgresql"
+        pg_norm = schema_list[0] if schema_list else "public"
+        if is_postgres:
+            cache_subkey = f"pg:{'|'.join(schema_list)}:rows={int(bool(include_row_counts))}:rels={int(bool(include_relationships))}"
+        else:
+            cache_subkey = f"default:rows={int(bool(include_row_counts))}:rels={int(bool(include_relationships))}"
 
         cached = remote_db_manager.get_schema_cache(connection_id, cache_subkey)
         if cached is not None and not refresh:
@@ -402,18 +494,54 @@ def get_connection_schema(
                 "connection_id": connection_id,
                 "tables": cached,
                 "cached": True,
-                "pg_schema": pg_norm if rec.db_type == "postgresql" else None,
+                "pg_schema": pg_norm if is_postgres else None,
+                "pg_schemas": schema_list if is_postgres else None,
             }
 
-        tables = _build_schema_tables(engine, rec, pg_norm, include_row_counts)
+        inaccessible_schemas: List[str] = []
+        if is_postgres:
+            tables: List[dict] = []
+            for schema_name in schema_list:
+                try:
+                    tables.extend(_build_schema_tables(engine, rec, schema_name, include_row_counts, include_relationships))
+                except Exception:
+                    # Keep partial results when user has restricted schema access.
+                    inaccessible_schemas.append(schema_name)
+        else:
+            tables = _build_schema_tables(engine, rec, pg_norm, include_row_counts, include_relationships)
+
         remote_db_manager.set_schema_cache(connection_id, tables, cache_subkey)
         return {
             "connection_id": connection_id,
             "db_type": rec.db_type,
             "tables": tables,
             "cached": False,
-            "pg_schema": pg_norm if rec.db_type == "postgresql" else None,
+            "pg_schema": pg_norm if is_postgres else None,
+            "pg_schemas": schema_list if is_postgres else None,
+            "inaccessible_schemas": inaccessible_schemas if is_postgres else [],
         }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Connection not found or expired")
+    except Exception as exc:
+        raise _db_error(exc)
+
+
+@router.get("/schemas")
+def get_connection_schemas(connection_id: str):
+    try:
+        engine, rec = remote_db_manager.get_engine(connection_id)
+        db_type = (rec.db_type or "").lower()
+        if db_type == "postgresql":
+            schemas = _pg_list_accessible_schemas(engine)
+            if not schemas:
+                schemas = ["public"]
+            return {"connection_id": connection_id, "db_type": db_type, "schemas": schemas}
+
+        if db_type == "mysql":
+            return {"connection_id": connection_id, "db_type": db_type, "schemas": [rec.database]}
+
+        # mssql default schema for this module
+        return {"connection_id": connection_id, "db_type": db_type, "schemas": ["dbo"]}
     except KeyError:
         raise HTTPException(status_code=404, detail="Connection not found or expired")
     except Exception as exc:
@@ -443,10 +571,19 @@ def run_query(payload: QueryRequest):
             count_sql = sqlalchemy.text(f"SELECT COUNT(*) AS total FROM ({query}) q")
             params = {}
         else:
-            query = _build_table_query(payload.table_name or "", payload.limit, offset, rec.db_type)
+            table_name = (payload.table_name or "").strip()
+            if not table_name:
+                raise HTTPException(status_code=400, detail="table_name is required")
+            # PostgreSQL schema-aware table lookup to avoid UndefinedTable for non-search_path schemas.
+            if rec.db_type == "postgresql" and payload.pg_schema and "." not in table_name:
+                sch = str(payload.pg_schema).strip()
+                if sch and _safe_identifier(sch):
+                    table_name = f"{sch}.{table_name}"
+
+            query = _build_table_query(table_name, payload.limit, offset, rec.db_type)
             sql_text = sqlalchemy.text(query)
             # Safe count query using quoted identifier only
-            q_table = _quote_ident(payload.table_name or "", rec.db_type)
+            q_table = _quote_ident(table_name, rec.db_type)
             count_sql = sqlalchemy.text(f"SELECT COUNT(*) AS total FROM {q_table}")
             params = {}
 

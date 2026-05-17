@@ -26,12 +26,13 @@ export default function BISqlDatasetsPanel({
   onCatalogSearch,
   onCatalogAddTable,
   onCatalogTableClick,
+  catalogSchemas = [],
 }) {
   const [renamingId, setRenamingId] = useState(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [activeTab, setActiveTab] = useState('sql');
   const [catalogRootExpanded, setCatalogRootExpanded] = useState(true);
-  const [catalogSchemaExpanded, setCatalogSchemaExpanded] = useState(true);
+  const [catalogSchemaExpanded, setCatalogSchemaExpanded] = useState(() => new Set());
 
   const startRename = useCallback((e, ds) => {
     e.stopPropagation();
@@ -53,6 +54,17 @@ export default function BISqlDatasetsPanel({
     if (!query) return true;
     return tableName.includes(query);
   });
+
+  const groupedCatalogTables = filteredCatalogTables.reduce((acc, table) => {
+    const schemaName = String(table?.schema || 'public');
+    if (!acc[schemaName]) acc[schemaName] = [];
+    acc[schemaName].push(table);
+    return acc;
+  }, {});
+
+  const schemaOrder = Array.isArray(catalogSchemas) && catalogSchemas.length > 0
+    ? catalogSchemas
+    : Object.keys(groupedCatalogTables);
 
   if (collapsed) {
     return (
@@ -233,36 +245,53 @@ export default function BISqlDatasetsPanel({
                   </button>
                   {catalogRootExpanded && (
                     <>
-                      <button
-                        type="button"
-                        className="bi-panel-catalog-node bi-panel-catalog-node--level1"
-                        onClick={() => setCatalogSchemaExpanded((prev) => !prev)}
-                      >
-                        {catalogSchemaExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        <span>public</span>
-                      </button>
-                      {catalogSchemaExpanded && (
-                        <div className="bi-panel-catalog-table-list">
-                          {filteredCatalogTables.map((t) => (
+                      {schemaOrder.map((schemaName) => {
+                        const tablesForSchema = groupedCatalogTables[schemaName] || [];
+                        if (tablesForSchema.length === 0) return null;
+                        const isOpen = catalogSchemaExpanded.has(schemaName);
+                        return (
+                          <React.Fragment key={schemaName}>
                             <button
-                              key={t.table_name}
                               type="button"
-                              className="bi-panel-catalog-table-item"
-                              onClick={() => onCatalogTableClick && onCatalogTableClick(t)}
-                              title="Click for table info. Drag to add to model."
-                              draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer.effectAllowed = 'copy';
-                                e.dataTransfer.setData('application/x-osa-model-table', t.table_name);
-                                e.dataTransfer.setData('text/plain', t.table_name);
-                              }}
+                              className="bi-panel-catalog-node bi-panel-catalog-node--level1"
+                              onClick={() =>
+                                setCatalogSchemaExpanded((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(schemaName)) next.delete(schemaName);
+                                  else next.add(schemaName);
+                                  return next;
+                                })
+                              }
                             >
-                              <Table size={12} />
-                              <span>{t.table_name}</span>
+                              {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                              <span>{schemaName}</span>
                             </button>
-                          ))}
-                        </div>
-                      )}
+                            {isOpen && (
+                              <div className="bi-panel-catalog-table-list">
+                                {tablesForSchema.map((t) => (
+                                  <button
+                                    key={`${schemaName}.${t.table_name}`}
+                                    type="button"
+                                    className="bi-panel-catalog-table-item"
+                                    onClick={() => onCatalogTableClick && onCatalogTableClick(t)}
+                                    title="Click for table info. Drag to add to model."
+                                    draggable
+                                    onDragStart={(e) => {
+                                      const qualified = `${schemaName}.${t.table_name}`;
+                                      e.dataTransfer.effectAllowed = 'copy';
+                                      e.dataTransfer.setData('application/x-osa-model-table', qualified);
+                                      e.dataTransfer.setData('text/plain', qualified);
+                                    }}
+                                  >
+                                    <Table size={12} />
+                                    <span>{t.table_name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </>
                   )}
                 </>

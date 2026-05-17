@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
-import { Map, GitBranch } from 'lucide-react';
+import { GitBranch } from 'lucide-react';
 import './DynamicChart.css';
 import {
     BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -85,6 +85,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [configHint, setConfigHint] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [textContent, setTextContent] = useState(graphDefinition.content || '');
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -168,9 +169,18 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
         const cleanMeasureFields = (Array.isArray(measureFields) ? measureFields : [])
             .map((m) => typeof m === 'string' ? { column: m, aggregation: 'SUM' } : m)
             .filter((m) => m && m.column && String(m.column).trim() !== '');
+        // Keep a tiny minimum loader to avoid flicker, but never force a 2s delay.
+        const waitMinLoader = async (startedAt) => {
+            const elapsed = Date.now() - startedAt;
+            const remaining = 150 - elapsed;
+            if (remaining > 0) {
+                await new Promise((resolve) => setTimeout(resolve, remaining));
+            }
+        };
 
         // If the data is already provided in the graph definition, use it directly
         if (cached_data) {
+            setConfigHint(null);
             if (cached_data.is_table) {
                 setData({
                     columns: cached_data.columns || [],
@@ -199,17 +209,20 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
             const measField = y_axis || cleanMeasureFields[0]?.column || null;
             const measAgg = aggregation || cleanMeasureFields[0]?.aggregation?.toLowerCase() || 'sum';
 
-            if (!fileId || !dimField) {
-                // No file or no fields selected yet → show placeholder, no error
+            if (!fileId || !dimField || !measField) {
+                // Don't auto-guess fields; ask user to configure buckets explicitly.
                 setData([]);
                 setLoading(false);
                 setError(null);
+                setConfigHint('Select at least one Dimension and one Measure to render this visual.');
                 return;
             }
 
             const fetchCustomData = async () => {
+                const startedAt = Date.now();
                 setLoading(true);
                 setError(null);
+                setConfigHint(null);
                 try {
                     const response = await fetch(`/api/files/${fileId}/graph-data`, {
                         method: 'POST',
@@ -225,7 +238,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                     });
 
                     if (!response.ok) {
-                        setData([]);
+                        setError('Failed to fetch graph data');
                         setLoading(false);
                         return;
                     }
@@ -240,17 +253,22 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                             subject: String(label),
                             value: result.values?.[i] ?? 0
                         }));
-                        setData(transformed);
+                        if (transformed.length > 0) {
+                            setData(transformed);
+                        }
                         setScTotalPoints(result.total_points || transformed.length);
                     } else if (Array.isArray(result)) {
-                        setData(result);
+                        if (result.length > 0) {
+                            setData(result);
+                        }
                     } else {
-                        setData([]);
+                        setError('No data returned for current field selection');
                     }
                 } catch (err) {
                     console.error('Custom visual data fetch failed:', err);
-                    setData([]);
+                    setError(err?.message || 'Custom visual data fetch failed');
                 } finally {
+                    await waitMinLoader(startedAt);
                     setLoading(false);
                 }
             };
@@ -268,14 +286,28 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
             } else if (graph_type === 'smart_narrative') {
                 setData([{ name: 'smart_narrative', value: 0 }]);
             }
+            setConfigHint(null);
             setLoading(false);
             return;
         }
 
+        if (graph_type !== 'table') {
+            const hasDimension = Boolean((x_axis && String(x_axis).trim()) || cleanDimensionFields.length > 0);
+            const hasMeasure = Boolean((y_axis && String(y_axis).trim()) || cleanMeasureFields.length > 0);
+            if (!hasDimension || !hasMeasure) {
+                setData([]);
+                setLoading(false);
+                setError(null);
+                setConfigHint('Select at least one Dimension and one Measure to render this visual.');
+                return;
+            }
+        }
+
         const fetchData = async () => {
+            const startedAt = Date.now();
             try {
-                // Only set loading if we don't already have data to prevent blanking the UI
-                if (!data) setLoading(true);
+                setLoading(true);
+                setConfigHint(null);
 
                 const response = await fetch(`/api/files/${fileId}/graph-data`, {
                     method: 'POST',
@@ -290,11 +322,21 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                     })
                 });
 
-                if (!response.ok) throw new Error('Failed to fetch graph data');
-                const result = await response.json();
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const msg = result?.detail || result?.message || `HTTP ${response.status}`;
+                    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                }
 
                 if (!result) {
-                    setData([]);
+                    setError('No data returned for current field selection');
+                    return;
+                }
+                if (result && typeof result === 'object' && result.processing) {
+                    // Backend is preparing the dataset (common for blank report + SQL-imported tables).
+                    // Keep loading so the user doesn't see "No data".
+                    setError(null);
+                    setConfigHint(result.message || 'Preparing data…');
                     return;
                 }
 
@@ -311,7 +353,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                             });
                         }
                     } else {
-                        setData([]);
+                        setError('No table data available for current field selection');
                     }
                     return;
                 }
@@ -322,7 +364,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                 }
 
                 if (!Array.isArray(result.labels)) {
-                    setData([]);
+                    setError('No data returned for current field selection');
                     return;
                 }
 
@@ -331,7 +373,11 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                     value: result.values ? result.values[index] : null
                 }));
 
-                setData(transformedData);
+                if (transformedData.length > 0) {
+                    setData(transformedData);
+                } else {
+                    setError('No data returned for current field selection');
+                }
                 setScTotalPoints(Number(result.total_points) || transformedData.length);
                 if (onUpdate) {
                     onUpdate({
@@ -345,6 +391,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
             } catch (err) {
                 setError(err.message);
             } finally {
+                await waitMinLoader(startedAt);
                 setLoading(false);
             }
         };
@@ -531,6 +578,78 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
             const customConfig = { ...opts, xAxis: graphDefinition.x_axis, yAxis: graphDefinition.y_axis };
             return <CustomVisualRenderer visual={customVisual} data={chartData} config={customConfig} />;
         }
+
+        const buildSankeyData = () => {
+            if (graphDefinition?.sankeyData?.nodes?.length && graphDefinition?.sankeyData?.links?.length) {
+                return graphDefinition.sankeyData;
+            }
+
+            if (!Array.isArray(chartData) || chartData.length === 0) return null;
+
+            const dimensionFields = Array.isArray(opts.dimension_fields) ? opts.dimension_fields : [];
+            const sourceField = opts.sankeySourceField || graphDefinition.sankeySourceField || dimensionFields[0] || 'source';
+            const targetField = opts.sankeyTargetField || graphDefinition.sankeyTargetField || dimensionFields[1] || 'target';
+            const valueField = opts.sankeyValueField || graphDefinition.sankeyValueField || graphDefinition.y_axis || 'value';
+
+            // Aggregate duplicate source->target edges.
+            const edgeMap = new Map();
+            for (const row of chartData) {
+                const srcRaw = row?.[sourceField] ?? row?.source ?? row?.from ?? row?.name;
+                const tgtRaw = row?.[targetField] ?? row?.target ?? row?.to;
+                const valRaw = row?.[valueField] ?? row?.value ?? 1;
+
+                if (srcRaw == null || tgtRaw == null) continue;
+                const src = String(srcRaw).trim();
+                const tgt = String(tgtRaw).trim();
+                if (!src || !tgt) continue;
+
+                const val = Number(valRaw);
+                const safeVal = Number.isFinite(val) && val > 0 ? val : 1;
+                const key = `${src}__->__${tgt}`;
+                edgeMap.set(key, (edgeMap.get(key) || 0) + safeVal);
+            }
+
+            // Fallback: if target doesn't exist in data, build root -> category flow
+            if (edgeMap.size === 0) {
+                for (const row of chartData) {
+                    const tgtRaw = row?.name ?? row?.label ?? row?.[sourceField];
+                    if (tgtRaw == null) continue;
+                    const tgt = String(tgtRaw).trim();
+                    if (!tgt) continue;
+                    const val = Number(row?.[valueField] ?? row?.value ?? 1);
+                    const safeVal = Number.isFinite(val) && val > 0 ? val : 1;
+                    const key = `Total__->__${tgt}`;
+                    edgeMap.set(key, (edgeMap.get(key) || 0) + safeVal);
+                }
+            }
+
+            if (edgeMap.size === 0) return null;
+
+            const nodeIndex = new Map();
+            const nodes = [];
+            const ensureNode = (name) => {
+                if (nodeIndex.has(name)) return nodeIndex.get(name);
+                const idx = nodes.length;
+                nodeIndex.set(name, idx);
+                nodes.push({ name });
+                return idx;
+            };
+
+            const links = [];
+            [...edgeMap.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 180)
+                .forEach(([k, v]) => {
+                    const [src, tgt] = k.split('__->__');
+                    const s = ensureNode(src);
+                    const t = ensureNode(tgt);
+                    if (s === t) return;
+                    links.push({ source: s, target: t, value: v });
+                });
+
+            if (links.length === 0 || nodes.length < 2) return null;
+            return { nodes, links };
+        };
 
         switch (graphDefinition.graph_type) {
             case 'smart_narrative': {
@@ -1521,9 +1640,13 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
                     </BarChart>
                 );
             case 'sankey':
+                const sankeyData = buildSankeyData();
+                if (!sankeyData) {
+                    return <div className="chart-empty">Assign source and target fields for Sankey flow.</div>;
+                }
                 return (
                     <Sankey
-                        data={graphDefinition.sankeyData || { nodes: [{ name: 'A' }, { name: 'B' }], links: [{ source: 0, target: 1, value: 100 }] }}
+                        data={sankeyData}
                         margin={{ top: 10, left: 10, right: 10, bottom: 10 }}
                         node={{ stroke: '#fff', strokeWidth: 1, fill: mainColor }}
                         link={{ stroke: mainColor, fillOpacity: 0.2 }}
@@ -2178,6 +2301,7 @@ const DynamicChart = ({ fileId, graphDefinition, selection = null, onClick, onUp
     if (!noDataRenderTypes.has(graphDefinition.graph_type)) {
         if (loading && !data) return <div className="chart-loading">Loading chart...</div>;
         if (error && !data) return <div className="chart-error">Error: {error}</div>;
+        if (configHint) return <div className="chart-empty">{configHint}</div>;
         if (!data || (Array.isArray(data) && data.length === 0)) {
             if (loading) return <div className="chart-loading">Loading chart...</div>;
             return <div className="chart-empty">No data available</div>;

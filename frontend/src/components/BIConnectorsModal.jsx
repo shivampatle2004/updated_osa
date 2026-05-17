@@ -58,9 +58,10 @@ const CONNECTORS = [
   { id: 'csv',      engine: 'csv',      label: 'Text / CSV',           short: 'CSV',      cat: 'file',          icon: FileText,        accent: '#605e5c' },
   { id: 'json',     engine: 'json',     label: 'JSON',                 short: 'JSON',     cat: 'file',          icon: FileJson,        accent: '#ca8a04' },
   { id: 'parquet',  engine: 'parquet',  label: 'Parquet',              short: 'Parquet',  cat: 'file',          icon: Layers,          accent: '#7c3aed' },
-  { id: 'xml',      engine: null,       label: 'XML',                  short: 'XML',      cat: 'file',          icon: Code,            accent: '#ea580c' },
-  { id: 'pdf',      engine: null,       label: 'PDF',                  short: 'PDF',      cat: 'file',          icon: FileText,        accent: '#b91c1c' },
-  { id: 'folder',   engine: null,       label: 'Folder',               short: 'Folder',   cat: 'file',          icon: HardDrive,       accent: '#0369a1' },
+  // Coming Soon — re-enable once a backend engine is wired up
+  // { id: 'xml',      engine: null,       label: 'XML',                  short: 'XML',      cat: 'file',          icon: Code,            accent: '#ea580c' },
+  // { id: 'pdf',      engine: null,       label: 'PDF',                  short: 'PDF',      cat: 'file',          icon: FileText,        accent: '#b91c1c' },
+  // { id: 'folder',   engine: null,       label: 'Folder',               short: 'Folder',   cat: 'file',          icon: HardDrive,       accent: '#0369a1' },
 
   // Database
   { id: 'postgres',   engine: 'postgres',   label: 'PostgreSQL',         short: 'PostgreSQL',  cat: 'database', icon: Database, accent: '#336791' },
@@ -69,8 +70,9 @@ const CONNECTORS = [
   { id: 'sqlite',     engine: 'sqlite',     label: 'SQLite',             short: 'SQLite',      cat: 'database', icon: Database, accent: '#003b57' },
   { id: 'snowflake',  engine: 'snowflake',  label: 'Snowflake',          short: 'Snowflake',   cat: 'database', icon: Cloud,    accent: '#29b5e8' },
   { id: 'warehouse',  engine: 'warehouse',  label: 'Internal Warehouse', short: 'Warehouse',   cat: 'database', icon: Server,   accent: '#5b21b6' },
-  { id: 'sql_server', engine: null,         label: 'SQL Server',         short: 'SQL Server',  cat: 'database', icon: Database, accent: '#cc2927' },
-  { id: 'oracle',     engine: null,         label: 'Oracle',             short: 'Oracle',      cat: 'database', icon: Database, accent: '#c74634' },
+  // Coming Soon — re-enable once a backend engine is wired up
+  // { id: 'sql_server', engine: null,         label: 'SQL Server',         short: 'SQL Server',  cat: 'database', icon: Database, accent: '#cc2927' },
+  // { id: 'oracle',     engine: null,         label: 'Oracle',             short: 'Oracle',      cat: 'database', icon: Database, accent: '#c74634' },
 
   // CRM / ERP
   { id: 'salesforce', engine: 'salesforce', label: 'Salesforce',       short: 'Salesforce',   cat: 'crm_erp', icon: Activity,  accent: '#00a1e0' },
@@ -105,17 +107,20 @@ const CONNECTORS = [
   { id: 'airtable', engine: 'airtable', label: 'Airtable', short: 'Airtable',cat: 'collab', icon: Layers,     accent: '#ff6d00' },
 
   // Power Platform
-  { id: 'powerbi_dataset', engine: null, label: 'Power BI Datasets', short: 'PBI datasets', cat: 'power_platform', icon: BarChart3, accent: '#f2c811' },
+  // Coming Soon — re-enable once a backend engine is wired up
+  // { id: 'powerbi_dataset', engine: null, label: 'Power BI Datasets', short: 'PBI datasets', cat: 'power_platform', icon: BarChart3, accent: '#f2c811' },
 
   // Azure / Cloud
   { id: 's3',        engine: 's3',    label: 'S3 / Object Storage', short: 'S3 / Blob', cat: 'azure', icon: HardDrive, accent: '#ff9900' },
-  { id: 'azure_sql', engine: null,    label: 'Azure SQL Database',  short: 'Azure SQL', cat: 'azure', icon: Cloud,     accent: '#0078d4' },
+  // Coming Soon — re-enable once a backend engine is wired up
+  // { id: 'azure_sql', engine: null,    label: 'Azure SQL Database',  short: 'Azure SQL', cat: 'azure', icon: Cloud,     accent: '#0078d4' },
 
   // Other
   { id: 'rest_api',  engine: 'rest_api',  label: 'Web / REST API',  short: 'REST API', cat: 'other', icon: Globe,    accent: '#059669' },
   { id: 'odata',     engine: 'rest_api',  label: 'OData / REST',    short: 'OData',    cat: 'other', icon: Link2,    accent: '#0d9488' },
-  { id: 'python',    engine: null,         label: 'Python script',   short: 'Python',   cat: 'other', icon: Terminal, accent: '#3776ab' },
-  { id: 'r_script',  engine: null,         label: 'R script',        short: 'R',        cat: 'other', icon: Terminal, accent: '#276dc3' },
+  // Coming Soon — re-enable once a backend engine is wired up
+  // { id: 'python',    engine: null,         label: 'Python script',   short: 'Python',   cat: 'other', icon: Terminal, accent: '#3776ab' },
+  // { id: 'r_script',  engine: null,         label: 'R script',        short: 'R',        cat: 'other', icon: Terminal, accent: '#276dc3' },
 ];
 
 function categoryCounts(list) {

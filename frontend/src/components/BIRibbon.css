@@ -201,6 +201,57 @@
     margin-bottom: -1px;
 }
 
+/* ── AI Insights tab — premium pill with gradient text + glow ── */
+.bi-ribbon-tab.bi-ai-tab-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, rgba(139, 109, 214, 0.08), rgba(91, 58, 163, 0.04));
+    color: #5b3aa3;
+    font-weight: 600;
+    border-radius: 999px;
+    margin: 3px 4px 3px 6px;
+    padding: 5px 12px 5px 10px;
+    position: relative;
+    transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+}
+
+.bi-ribbon-tab.bi-ai-tab-pill::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(139, 109, 214, 0.55), rgba(91, 58, 163, 0.35));
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0.55;
+    transition: opacity 0.2s ease;
+}
+
+.bi-ribbon-tab.bi-ai-tab-pill:hover {
+    background: linear-gradient(135deg, rgba(139, 109, 214, 0.16), rgba(91, 58, 163, 0.08));
+    box-shadow: 0 6px 18px -10px rgba(91, 58, 163, 0.5);
+}
+
+.bi-ribbon-tab.bi-ai-tab-pill:hover::before { opacity: 0.85; }
+
+.bi-ribbon-tab.bi-ai-tab-pill.active {
+    background: linear-gradient(135deg, #8b6dd6 0%, #5b3aa3 100%);
+    color: #fff;
+    box-shadow: 0 8px 20px -10px rgba(91, 58, 163, 0.7);
+    margin-bottom: 3px;
+}
+
+.bi-ribbon-tab.bi-ai-tab-pill.active::before { opacity: 0; }
+
+.bi-ai-tab-pill-icon { flex-shrink: 0; }
+.bi-ribbon-tab.bi-ai-tab-pill.active .bi-ai-tab-pill-icon { color: #fff; }
+
 /* Contextual Tab (Measure Tools, Table Tools) */
 .bi-context-tab {
     color: #0e0f0f;

@@ -159,6 +159,9 @@ class DataProcessor:
                 df = pd.read_csv(file_path, sep=None, engine="python")
             elif extension == "tsv":
                 df = pd.read_csv(file_path, sep="\t")
+            elif extension == "osa":
+                # Handle gracefully if a workspace shell was mistakenly passed
+                df = pd.DataFrame()
             else:
                 raise ValueError(f"Unsupported file extension: {extension}")
         except Exception as e:
@@ -269,6 +272,13 @@ class DataProcessor:
 
         for col in df.columns:
             series = df[col]
+            # pandas returns a DataFrame when column names are duplicated.
+            # Keep inference resilient by using the first matching column.
+            if isinstance(series, pd.DataFrame):
+                if series.shape[1] == 0:
+                    types[col] = "categorical"
+                    continue
+                series = series.iloc[:, 0]
 
             if pd.api.types.is_numeric_dtype(series):
                 types[col] = "numeric"
@@ -313,6 +323,12 @@ class DataProcessor:
     @staticmethod
     def get_column_stats(df: pd.DataFrame, col_name: str, col_type: str) -> Dict[str, Any]:
         series = df[col_name]
+        # Duplicate column names can return a DataFrame; use first column for stats.
+        if isinstance(series, pd.DataFrame):
+            if series.shape[1] == 0:
+                series = pd.Series(dtype="object")
+            else:
+                series = series.iloc[:, 0]
         
         # Optimization: Consolidate multiple calculations into fewer passes
         null_count = int(series.isnull().sum())
@@ -324,8 +340,28 @@ class DataProcessor:
         }
 
         if col_type == "numeric":
-            # Using agg for single-pass calculation of common stats
-            agg_stats = series.agg(['min', 'max', 'mean', 'median', 'std']).to_dict()
+            # Numeric columns can still contain currency/text-formatted numbers
+            # (e.g. "$3,000", "12%", "(450)"); coerce before computing stats.
+            def _clean_numeric_value(v: Any) -> str:
+                s = str(v).strip()
+                if not s:
+                    return s
+                s = s.replace("\u00a0", " ")
+                if s.startswith("(") and s.endswith(")") and len(s) > 2:
+                    s = "-" + s[1:-1].strip()
+                s = re.sub(r"[$€£¥₹]", "", s)
+                s = s.replace(" ", "")
+                if s.endswith("%"):
+                    s = s[:-1]
+                if "," in s:
+                    if "." in s:
+                        s = s.replace(",", "")
+                    else:
+                        s = s.replace(",", ".")
+                return s
+
+            numeric_series = pd.to_numeric(series.map(_clean_numeric_value), errors="coerce")
+            agg_stats = numeric_series.agg(['min', 'max', 'mean', 'median', 'std']).to_dict()
             stats.update({
                 "min_value": float(agg_stats['min']) if not pd.isna(agg_stats['min']) else None,
                 "max_value": float(agg_stats['max']) if not pd.isna(agg_stats['max']) else None,

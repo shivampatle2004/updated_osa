@@ -201,10 +201,14 @@ async def upload_file(
         pass
 
     # Create DB record - allow anonymous uploads (user_id can be NULL)
+    display_name = file.filename
+    if not display_name.lower().endswith(".osa"):
+        display_name += ".osa"
+
     db_file = UploadedFile(
         id=str(file_id),
         user_id=user_id,  # Will be None for anonymous users
-        file_name=file.filename,
+        file_name=display_name,
         file_path=file_path,
         status="pending"
     )
@@ -252,7 +256,7 @@ async def create_blank_report(
     with open(file_path, "wb") as buffer:
         buffer.write(b"_osa_placeholder\n")
 
-    display_name = "Untitled report.csv"
+    display_name = "Untitled report.osa"
     model_cfg = {
         "tables": [],
         "relationships": [],
@@ -318,7 +322,9 @@ def get_file_dataset(
 
     mc = file_record.model_config or {}
     rels = mc.get("relationships") or []
-    if isinstance(rels, list) and len(rels) > 0:
+    tables = mc.get("tables") or []
+    
+    if (isinstance(rels, list) and len(rels) > 0) or (isinstance(tables, list) and len(tables) > 0):
         try:
             from services.model_engine import ModelEngine
 
@@ -687,8 +693,10 @@ def get_file_schema(file_id: str, db: Session = Depends(get_db)):
 
     mc = file_record.model_config or {}
     rels = mc.get("relationships") or []
+    tables = mc.get("tables") or []
+    
     # Relationship model: same column names as charts/Data view (merged frame), not raw SQL only.
-    if isinstance(rels, list) and len(rels) > 0:
+    if (isinstance(rels, list) and len(rels) > 0) or (isinstance(tables, list) and len(tables) > 0):
         schema_data = ModelEngine.get_merged_schema(file_id, db) or []
         try:
             df = ModelEngine.load_report_dataframe(file_id, db)
@@ -896,7 +904,17 @@ async def retry_file_processing(
         return {"status": "processing", "message": "File is already processing"}
 
     # Clear previous derived metadata so recomputation is clean.
-    db.query(FileColumn).filter(FileColumn.file_id == file_id).delete()
+    # IMPORTANT: delete dependent ColumnStatistic rows first to avoid FK errors.
+    col_ids = [
+        cid for (cid,) in db.query(FileColumn.id).filter(FileColumn.file_id == file_id).all()
+    ]
+    if col_ids:
+        db.query(ColumnStatistic).filter(ColumnStatistic.column_id.in_(col_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(FileColumn).filter(FileColumn.file_id == file_id).delete(
+        synchronize_session=False
+    )
     db.query(GraphDefinition).filter(GraphDefinition.file_id == file_id).delete()
     file_record.status = "pending"
     file_record.error_message = None
@@ -912,9 +930,15 @@ def get_user_files(user_id: int, db: Session = Depends(get_db)):
     result = []
     for f in files:
         viz_count = db.query(GraphDefinition).filter(GraphDefinition.file_id == f.id).count()
+        
+        # Ensure fileName reflects the .osa extension requirement
+        display_name = f.file_name or "Untitled"
+        if not display_name.lower().endswith(".osa"):
+            display_name += ".osa"
+            
         result.append({
             "id": f.id,
-            "fileName": f.file_name,
+            "fileName": display_name,
             "uploadDate": f.created_at.strftime("%Y-%m-%d"),
             "uploadDateTime": f.created_at.strftime("%Y-%m-%d %H:%M") if f.created_at else None,
             "recordCount": f.row_count,
@@ -979,26 +1003,6 @@ def download_file(file_id: str, db: Session = Depends(get_db)):
         print(f"ERROR downloading file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
-@router.delete("/{file_id}")
-def delete_file(
-    file_id: str, 
-    db: Session = Depends(get_db),
-    _=Depends(verify_write_permission)
-):
-    file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-    if not file_record:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Optional: Delete physical file if it exists
-    if file_record.file_path and os.path.exists(file_record.file_path):
-        os.remove(file_record.file_path)
-        
-    db.query(GraphDefinition).filter(GraphDefinition.file_id == file_id).delete()
-    db.delete(file_record)
-    db.commit()
-    return {"message": "File deleted successfully"}
-
-
 @router.patch("/{file_id}")
 def rename_file(
     file_id: str,
@@ -1016,7 +1020,17 @@ def rename_file(
     new_name = (payload.get("fileName") or payload.get("file_name") or "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="fileName is required")
+    
+    if not new_name.lower().endswith(".osa"):
+        new_name += ".osa"
+
     file_record.file_name = new_name[:400]
+    
+    # Also sync the canvas header
+    mc = dict(file_record.model_config or {})
+    mc["reportHeaderText"] = new_name
+    file_record.model_config = mc
+    
     db.commit()
     return {"success": True, "fileName": file_record.file_name}
 
@@ -1035,6 +1049,9 @@ def save_as_file(
     new_name = (payload.get("fileName") or payload.get("file_name") or "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="fileName is required")
+    
+    if not new_name.lower().endswith(".osa"):
+        new_name += ".osa"
 
     src = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     if not src:
@@ -1043,11 +1060,11 @@ def save_as_file(
     if not src.file_path or not os.path.exists(src.file_path):
         raise HTTPException(status_code=404, detail="Source file not found on disk")
 
-    # Preserve extension from the original filename/path
-    extension = (src.file_name.split(".")[-1] if "." in src.file_name else "").lower()
+    # Always preserve the physical file extension from src.file_path
+    # This ensures DataProcessor can still read the cloned file (e.g. .csv, .xlsx)
+    extension = os.path.splitext(src.file_path)[1].lstrip(".").lower()
     if not extension:
-        # Fallback to file_path extension
-        extension = os.path.splitext(src.file_path)[1].lstrip(".").lower()
+        raise HTTPException(status_code=500, detail="Source file has no valid extension")
 
     new_id = str(uuid.uuid4())
     new_path = os.path.join(UPLOAD_DIR, f"{new_id}.{extension}") if extension else os.path.join(UPLOAD_DIR, f"{new_id}")
@@ -1058,6 +1075,9 @@ def save_as_file(
         raise HTTPException(status_code=500, detail=f"Failed to copy file: {str(e)}")
 
     # Create new UploadedFile record
+    new_mc = dict(src.model_config or {})
+    new_mc["reportHeaderText"] = new_name
+    
     dst = UploadedFile(
         id=new_id,
         user_id=src.user_id,
@@ -1067,7 +1087,7 @@ def save_as_file(
         column_count=src.column_count,
         status=src.status if src.status else "completed",
         error_message=None,
-        model_config=src.model_config
+        model_config=new_mc
     )
     db.add(dst)
     db.flush()  # ensure dst is present for FK constraints
@@ -1145,8 +1165,77 @@ def update_file_model(
 
     existing = file_record.model_config or {}
     merged = {**existing, **payload}
+
+    # Keep model tables durable in worksheet_data so DB-backed sources do not disappear
+    # across cache/session refreshes and diagnostics can become PG-backed quickly.
+    try:
+        import pandas as pd
+        from services.model_data_loader import load_table_dataframe
+
+        for t in list(merged.get("tables") or []):
+            table_id = (t.get("id") or "").strip()
+            if not table_id or table_id == "main":
+                continue
+            ws = ws_svc.get_worksheet_for_file(db, table_id)
+            if ws and ws.status == "ready":
+                continue
+
+            table_df = None
+            try:
+                table_df = load_table_dataframe(t, db)
+            except Exception as _load_err:
+                print(f"update_file_model: load_table_dataframe warning for {table_id}: {_load_err}")
+
+            if table_df is None:
+                # For uploaded-file tables, persist an empty schema-only worksheet fallback.
+                cols = t.get("columns") or []
+                if isinstance(cols, list) and cols:
+                    names = [str(c.get("name")) for c in cols if c and c.get("name")]
+                    if names:
+                        table_df = pd.DataFrame(columns=names)
+
+            if table_df is None:
+                continue
+
+            ws = ws or ws_svc.create_worksheet(
+                db=db,
+                name=(t.get("name") or table_id)[:200],
+                owner_id=file_record.user_id,
+                source_type="model_table",
+                source_id=table_id,
+            )
+            ws_svc.import_data_from_dataframe(table_df, ws.id, db=db)
+    except Exception as persist_err:
+        print(f"update_file_model: worksheet persistence warning for {file_id}: {persist_err}")
+
     file_record.model_config = merged
+    # Any model-table change can invalidate existing per-visual cached_data payloads.
+    db.query(GraphDefinition).filter(GraphDefinition.file_id == file_id).update(
+        {GraphDefinition.cached_data: None},
+        synchronize_session=False,
+    )
     db.commit()
+
+    # Invalidate model + graph caches after any model save so newly added tables/columns
+    # are visible immediately in Report view visuals.
+    try:
+        from services.model_engine import ModelEngine
+        with ModelEngine._model_df_cache_lock:
+            keys_to_drop = [k for k in ModelEngine._model_df_cache if file_id in k]
+            for k in keys_to_drop:
+                ModelEngine._model_df_cache.pop(k, None)
+    except Exception as cache_err:
+        print(f"update_file_model: model cache clear warning: {cache_err}")
+
+    try:
+        from routers import graphs as graphs_router
+        with graphs_router._GRAPH_QUERY_CACHE_LOCK:
+            keys_to_drop = [k for k in graphs_router._GRAPH_QUERY_CACHE if file_id in k]
+            for k in keys_to_drop:
+                graphs_router._GRAPH_QUERY_CACHE.pop(k, None)
+    except Exception as graph_cache_err:
+        print(f"update_file_model: graph cache clear warning: {graph_cache_err}")
+
     return {"message": "Model configuration saved successfully"}
 
 
@@ -1189,9 +1278,14 @@ def add_table_to_model(
 
     # Ensure newly added table data is persisted in worksheet_data (PostgreSQL-first),
     # regardless of whether the source is file upload or external SQL.
+    worksheet_persisted = False
+    worksheet_rows = 0
     try:
         ws_existing = ws_svc.get_worksheet_for_file(db, table_file_id)
-        if not (ws_existing and ws_existing.status == "ready"):
+        if ws_existing and ws_existing.status == "ready":
+            worksheet_persisted = True
+            worksheet_rows = int(ws_existing.total_rows or 0)
+        else:
             provisional_meta = {"id": table_file_id, "name": raw_name}
             if table_record.file_path and str(table_record.file_path).startswith("sql://"):
                 parts = str(table_record.file_path)[6:].split("/")
@@ -1202,7 +1296,16 @@ def add_table_to_model(
                     }
             from services.model_data_loader import load_table_dataframe
             table_df = load_table_dataframe(provisional_meta, db)
-            if table_df is not None and not table_df.empty:
+            if table_df is None:
+                # Build an empty frame from known schema so worksheet_data can still be marked ready
+                # and diagnostics don't keep this table in fallback mode.
+                import pandas as pd
+
+                col_rows = db.query(FileColumn).filter(FileColumn.file_id == table_file_id).all()
+                if col_rows:
+                    table_df = pd.DataFrame(columns=[c.column_name for c in col_rows])
+
+            if table_df is not None:
                 ws = ws_existing or ws_svc.create_worksheet(
                     db=db,
                     name=raw_name,
@@ -1211,6 +1314,8 @@ def add_table_to_model(
                     source_id=table_file_id,
                 )
                 ws_svc.import_data_from_dataframe(table_df, ws.id, db=db)
+                worksheet_persisted = True
+                worksheet_rows = int(len(table_df))
     except Exception as ws_err:
         print(f"add_table_to_model: worksheet persistence warning for {table_file_id}: {ws_err}")
 
@@ -1252,6 +1357,8 @@ def add_table_to_model(
         "success": True,
         "table_file_id": table_file_id,
         "table_name": raw_name,
+        "worksheet_persisted": worksheet_persisted,
+        "worksheet_rows": worksheet_rows,
         "tables": mc["tables"],
     }
 
@@ -1484,12 +1591,19 @@ def get_model_diagnostics(file_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{file_id}")
-def delete_file(file_id: str, db: Session = Depends(get_db)):
+def delete_file(
+    file_id: str,
+    user_id: Optional[int] = Query(None, description="When set, must match file owner"),
+    db: Session = Depends(get_db),
+    _=Depends(verify_write_permission)
+):
     """🗑️ Delete an uploaded file, its associated records, and its physical storage."""
     try:
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
+        if user_id is not None and file_record.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
         # 1. Resolve path and delete physical file from disk
         file_path = resolve_stored_file_path(file_record)
@@ -1518,7 +1632,7 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
             db.delete(role)
         print(f"🗑️ Deleted {len(roles)} RLS Roles and their rules for file {file_id}")
 
-        # 4. Delete associated DataVault items
+        # 4. Delete associated DataVault items before deleting UploadedFile row
         db.query(models.DataVaultItem).filter(models.DataVaultItem.file_id == file_id).delete()
         print(f"🗑️ Deleted DataVault items for file {file_id}")
 

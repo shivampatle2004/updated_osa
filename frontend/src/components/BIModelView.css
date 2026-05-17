@@ -1194,6 +1194,32 @@
     font-size: 13px;
 }
 
+.bi-model-schema-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.bi-model-schema-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid #dbe4ee;
+    border-radius: 999px;
+    background: #fff;
+    font-size: 12px;
+    color: #334155;
+    cursor: pointer;
+}
+
+.bi-model-schema-chip input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+}
+
 .bi-model-schema-err {
     font-size: 12px;
     color: #b91c1c;

@@ -84,7 +84,7 @@ function SignInModal({ isOpen, onClose, onLogin, onSwitchToSignUp, shouldNavigat
             if (onClose) onClose()
             if (onLogin) onLogin(name || formData.email.split('@')[0], id)
             if (shouldNavigate) {
-                navigate('/dashboard')
+                navigate('/')
             }
         } catch (err) {
             setErrors({ submit: err.message })

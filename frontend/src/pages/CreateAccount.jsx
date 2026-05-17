@@ -25,7 +25,7 @@ function CreateAccount({ isAuthenticated, onLogin }) {
 
     // Redirect if already authenticated
     if (isAuthenticated) {
-        navigate('/dashboard')
+        navigate('/')
         return null
     }
 
@@ -97,7 +97,7 @@ function CreateAccount({ isAuthenticated, onLogin }) {
             const name = data.full_name
             const id = data.id
             onLogin(name || formData.email.split('@')[0], id)
-            navigate('/dashboard')
+            navigate('/')
         } catch (err) {
             setErrors({ submit: err.message })
         } finally {

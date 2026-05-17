@@ -26,8 +26,8 @@
 
 .bi-connectors-modal {
     background: var(--bi-conn-surface);
-    width: min(920px, 100%);
-    max-height: min(680px, calc(100vh - 48px));
+    width: min(1180px, 100%);
+    max-height: min(860px, calc(100vh - 28px));
     border-radius: 8px;
     box-shadow:
         0 2px 4px rgba(0, 0, 0, 0.04),
@@ -569,7 +569,7 @@
 .bi-connectors-config-panel {
     flex: 1;
     overflow-y: auto;
-    padding: 20px 24px 24px;
+    padding: 18px 26px 22px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -617,13 +617,15 @@
 .dyn-form { display: flex; flex-direction: column; gap: 0; }
 
 .dyn-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
     padding-bottom: 4px;
+    align-items: start;
 }
 
 .dyn-field { display: flex; flex-direction: column; gap: 4px; }
+.dyn-field--full { grid-column: 1 / -1; }
 
 .dyn-label {
     font-size: 0.8125rem;
@@ -633,7 +635,7 @@
 }
 
 .dyn-input {
-    padding: 8px 11px;
+    padding: 9px 11px;
     border: 1px solid var(--bi-conn-border, #e1dfdd);
     border-radius: 4px;
     font-size: 0.875rem;
@@ -727,6 +729,22 @@
     margin-top: 18px;
     padding-top: 14px;
     border-top: 1px solid var(--bi-conn-border, #e1dfdd);
+}
+
+@media (max-width: 980px) {
+    .bi-connectors-modal {
+        width: min(980px, 100%);
+        max-height: calc(100vh - 24px);
+    }
+
+    .dyn-fields {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .dyn-field--full {
+        grid-column: 1;
+    }
 }
 
 .dyn-btn {

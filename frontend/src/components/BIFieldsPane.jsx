@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Search, Database, ChevronDown, ChevronRight, Hash, Type, Calendar, CheckSquare, Calculator } from 'lucide-react';
 
-const BIFieldsPane = ({ schema, dataset, fileName, measures = [], activeColumn, onSelectColumn }) => {
+const BIFieldsPane = ({ schema, dataset, fileName, measures = [], activeColumn, onSelectColumn, isFieldsRefreshing = false }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isDimensionsExpanded, setIsDimensionsExpanded] = useState(true);
     const [isNumericMeasuresExpanded, setIsNumericMeasuresExpanded] = useState(true);
@@ -77,11 +77,18 @@ const BIFieldsPane = ({ schema, dataset, fileName, measures = [], activeColumn, 
         const t = getType(col);
         return t.includes('categorical') || t.includes('string') || t.includes('text') || t.includes('object') || t.includes('bool');
     };
-    const isDimension = (col) => isCategorical(col) || isDate(col) || isNumeric(col);
+    // Per workspace expectation:
+    // - Dimensions list should include all columns
+    // - Measures list should include numeric columns only
+    const isDimension = () => true;
 
-    const filteredSchema = schema?.filter(s =>
-        s.column_name.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a, b) => a.column_name.localeCompare(b.column_name)) || [];
+    const filteredSchema = (schema || [])
+        .filter((s) => {
+            const name = (s?.column_name ?? '').toString();
+            if (!name) return false;
+            return name.toLowerCase().includes(searchTerm.toLowerCase());
+        })
+        .sort((a, b) => String(a?.column_name || '').localeCompare(String(b?.column_name || '')));
     const filteredDimensions = filteredSchema.filter(isDimension);
     const filteredNumericFields = filteredSchema.filter(isNumeric);
 
@@ -97,6 +104,25 @@ const BIFieldsPane = ({ schema, dataset, fileName, measures = [], activeColumn, 
                 <span className="bi-pane-title">Fields</span>
             </div>
 
+            {isFieldsRefreshing && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 12px',
+                    margin: '0 12px 10px',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    background: '#f8fafc',
+                    color: '#334155',
+                    fontSize: 12,
+                    fontWeight: 600,
+                }}>
+                    <div className="bi-loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+                    Refreshing fields…
+                </div>
+            )}
+
             <div className="bi-pane-search">
                 <Search size={14} />
                 <input
@@ -104,6 +130,7 @@ const BIFieldsPane = ({ schema, dataset, fileName, measures = [], activeColumn, 
                     placeholder="Search"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
+                    disabled={isFieldsRefreshing}
                 />
             </div>
 
