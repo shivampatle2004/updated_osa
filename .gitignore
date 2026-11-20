@@ -1,5 +1,8 @@
 # Python
 backend/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
 backend/venv/
 backend/.env
 backend/analytics.db
@@ -14,6 +17,7 @@ frontend/.vite/
 frontend/dist/
 frontend/.env
 frontend/.next/
+backend/static/assets/
 
 # IDEs
 .vscode/
